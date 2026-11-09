@@ -151,25 +151,25 @@ def run_project(c,rid,root,lang,rels,hashes,warnings):
  def errors(entry):
   return [d for d in (entry.get("diagnostics") or []) if isinstance(d,dict) and d.get("severity")=="error"]
  for rel in rels:
-  e=entries.get(rel)
-  if e is None:
-   warnings.append(rel+": analyzer returned no entry");diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
-  fnode=fnode_for(c,rel)
-  if fnode is None: warnings.append(rel+": file node missing; skipped");continue
+  if rel in entries: continue
+  warnings.append(rel+": analyzer returned no entry");diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel))
+ # The analyzer resolves the whole project, so its output for a file that did not change
+ # is more current than what the index holds: a symbol this file calls may have been
+ # renamed in a file that did change, and applying only `rels` left the old edge pointing
+ # at a symbol that no longer exists, which cleanup_calls then deleted.
+ for path,e in sorted(entries.items()):
+  fnode=fnode_for(c,path)
+  if fnode is None: continue
   errs=errors(e)
   try:
    with c:
-    apply_file(c,rid,rel,fnode,e)
-    if errs: mark(c,rel,"failed",hashes.get(rel))
-    else: mark(c,rel,SEM_OK,hashes[rel])
+    apply_file(c,rid,path,fnode,e)
+    if path in rels: mark(c,path,"failed" if errs else SEM_OK,hashes.get(path))
   except Exception as ex:
-   warnings.append(rel+": apply failed, previous rows kept: "+str(ex));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
-  if errs:
-   warnings.append(rel+": "+str(errs[0].get("message",""))[:200]);diag(c,rid,rel,warnings[-1])
- for path,e in entries.items():
-  if path in rels: continue
-  for d in errors(e):
-   warnings.append(path+": "+str(d.get("message",""))[:200])
+   warnings.append(path+": apply failed, previous rows kept: "+str(ex));diag(c,rid,path,warnings[-1])
+   mark(c,path,"failed",hashes.get(path));continue
+  if errs and path in rels:
+   warnings.append(path+": "+str(errs[0].get("message",""))[:200]);diag(c,rid,path,warnings[-1])
  return True
 def sync(a):
  root=Path(a.root).resolve();c=db(root);wanted={a.lang} if getattr(a,"lang",None) else None

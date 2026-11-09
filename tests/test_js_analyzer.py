@@ -148,5 +148,60 @@ class JsSemanticStatus(unittest.TestCase):
             capture_output=True, text=True).stdout)
         self.assertIn("src/broken.ts", out["files_without_semantics"])
 
+
+@unittest.skipUnless(ready, "js analyzer or its node_modules not installed")
+class JsIncrementalEdges(unittest.TestCase):
+    """Changing an export must not make the callers of that symbol disappear.
+
+    The analyzer resolves the whole project, but the coordinator applied its output only
+    to the files whose hash changed. A file that kept calling a renamed symbol was never
+    re-applied, cleanup_calls removed its edge because the callee was gone, and verify()
+    still said ok -- the callers were silently lost until a --full sync restored them.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "proj"
+        (self.root / "src").mkdir(parents=True)
+        (self.root / "src" / "b.ts").write_text(
+            "export function one() { return 1; }\nexport { one as target };\n")
+        (self.root / "src" / "a.ts").write_text(
+            "import { target } from './b';\nexport function run() { return target(); }\n")
+        subprocess.run([sys.executable, str(SCRIPT), "init", "--root", str(self.root)],
+                       check=True, capture_output=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def sync(self, *extra):
+        return json.loads(subprocess.run(
+            [sys.executable, str(SCRIPT), "sync", "--root", str(self.root), "--lang", "js", *extra],
+            capture_output=True, text=True, check=True).stdout)
+
+    def edges(self):
+        con = sqlite3.connect(self.root / ".code-inventory" / "inventory.sqlite3")
+        try:
+            return set(con.execute("select caller_symbol_key, callee_symbol_key from calls"))
+        finally:
+            con.close()
+
+    def test_incremental_keeps_edge_to_renamed_symbol(self):
+        self.sync()
+        self.assertIn(("js:src/a:run", "js:src/b:one"), self.edges())
+        (self.root / "src" / "b.ts").write_text(
+            "export function two() { return 2; }\nexport { two as target };\n")
+        report = self.sync()
+        self.assertEqual(report["analyzer_status"], "ok", report["warnings"])
+        self.assertIn(("js:src/a:run", "js:src/b:two"), self.edges())
+
+    def test_incremental_matches_full(self):
+        self.sync()
+        (self.root / "src" / "b.ts").write_text(
+            "export function two() { return 2; }\nexport { two as target };\n")
+        self.sync()
+        incremental = self.edges()
+        self.sync("--full")
+        self.assertEqual(incremental, self.edges())
+
 if __name__ == "__main__":
     unittest.main()

@@ -225,7 +225,10 @@ function visitClassBody(body, classKey, ctx) {
       const name = member.computed ? null : (member.key.name || member.key.value);
       if (!name) continue;
       const key = childKey(ctx, classKey, name);
-      decl(ctx, 'field', name, key, classKey, `${name} = ${slice(ctx.code, member.value.start, member.value.end)}`,
+      const fieldText = member.value
+        ? `${name} = ${slice(ctx.code, member.value.start, member.value.end)}`
+        : name;
+      decl(ctx, 'field', name, key, classKey, fieldText,
            member.loc.start.line + ctx.lineOffset);
       if (member.value) visit(member.value, classKey, classKey, classKey, ctx);
     }

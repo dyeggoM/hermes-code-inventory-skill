@@ -1,7 +1,7 @@
 ---
 name: code-inventory
 description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.4.1
+version: 0.5.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -34,8 +34,11 @@ is `references/analyzer-contract.md` — read it before adding a language.
 ## Workflow
 
 1. `python3 scripts/inventory.py init --root /path/to/project`
-   The index is not source: add `<project>/.code-inventory/` to that project's `.gitignore` (and
-   `AI_INVENTORY.md` / `inventory/` if you render there), or its `git status` fills with database files.
+   The index is not source: add `<project>/.code-inventory/` to that project's `.gitignore`, or its
+   `git status` fills with database files. Whether `AI_INVENTORY.md` (and `inventory/` in split
+   mode) is ignored is a decision: ignore it when the map is a local aid, commit it when reviewers
+   and other agents should read it — and then refresh it before every commit (see *Committing the
+   document*).
 2. Make each language's analyzer available (only the ones you need):
    - *C#* — build once and copy into the project:
      `dotnet build analyzers/csharp/CodeInventory.Analyzer.csproj -c Release` then
@@ -71,10 +74,36 @@ from instead of the repository:
 and callees by `path:line` — that is the unit to hand a model together with the task. `--budget`
 caps it.
 
-**Commit the document, keep it honest.** `--no-stamp` drops the timestamp/commit line from the
-header, so rendering the same code twice produces a byte-identical file. Use it when
-`AI_INVENTORY.md` is committed (a pre-commit hook is the usual place): the diff then only moves when
-the code does, instead of changing on every run.
+### Committing the document
+
+`--no-stamp` drops the timestamp/commit line from the header, so rendering the same code twice
+produces a byte-identical file. Without it every re-render diffs (`Generated 2026-… from <sha>`), and
+a refresh-before-commit can never leave the tree clean.
+
+When `AI_INVENTORY.md` is committed, refresh it from the **staged** files in a pre-commit hook, so
+the document in a diff describes the code in that same diff. `templates/pre-commit-hook.sh` is a
+working hook — copy it to `.githooks/pre-commit`, `chmod +x`, and
+`git config core.hooksPath .githooks` once per clone. What it has to get right:
+
+- **Scope the sync to the staged languages** (`*.ts/*.vue/*.js` → the JS root, `*.cs` → each C#
+  root). Syncing everything on every commit pays the Roslyn cost (~5 s per file) for a docs edit.
+- **`git add` the rendered file.** A hook that regenerates without staging leaves the refresh out of
+  the commit and the worktree dirty.
+- **Pass `--no-stamp`**, or the header moves on every run and the commit is never clean.
+- **Use `--diff-filter=ACMRD`** so a deleted or renamed file also triggers the sync that drops its
+  rows.
+- **Missing skill → warn and `exit 0`.** A clone without the tool must still be able to commit. The
+  per-commit escape is `git commit --no-verify`; do not invent a second bypass switch.
+- **Export `DOTNET_ROOT`/`PATH` inside the hook.** SDKs installed with `dotnet-install.sh` are not on
+  a fresh shell's PATH, and the hook runs in whatever environment the commit was typed in.
+- **Say when the working tree is dirty.** The index is built from files on disk, so a partially
+  staged commit embeds the unstaged edits and the document ends up slightly ahead of the commit that
+  carries it. Print a one-line warning; rendering the index itself (a `git checkout-index` copy in a
+  temp directory) is only worth it where partial staging is the norm.
+
+Expect the document to move on every code commit — line numbers shift, so a one-line edit rewrites a
+file's entries. That is the cost of committing it; a team that finds the noise loud should refresh on
+release instead and say so.
 
 **Large repos split automatically.** When the single document would exceed `--max-chars`, the same
 path becomes a router index and each module gets `inventory/<module>.md`: over `--depth 2` path
@@ -220,6 +249,7 @@ analyzers/python/   python_analyzer.py (stdlib ast)
 analyzers/js/       analyze.js + package.json/lock
 test-scenarios/     csharp/, python/, js/ — the sample trees the integration tests index
 references/         schema, roadmap, setup-dotnet, analyzer-contract
+templates/          pre-commit-hook.sh — refresh + stage AI_INVENTORY.md before a commit
 tests/              coordinator, one suite per analyzer, ai_inventory
 ```
 

@@ -14,7 +14,7 @@ Defaults: --repo $CODE_INVENTORY_REPO or ~/projects/code-inventory,
           --skill $CODE_INVENTORY_SKILL or ~/.hermes/skills/software-development/code-inventory
 
 Exit codes: 0 up to date (or applied), 10 update available, 11 local edits would be overwritten,
-13 installed copy and the target ref diverged, 2 error.
+2 error.
 """
 
 from __future__ import annotations
@@ -89,6 +89,33 @@ def has_commit(repo: Path, rev: str) -> bool:
     return proc.returncode == 0
 
 
+def upstream_deleted(repo: Path, rev: str, path: str) -> bool:
+    """True when `rev`'s history contains a commit that deleted `path`."""
+    out = git(repo, "log", "--format=%H", "--max-count=1", "--diff-filter=D", rev, "--", path,
+              check=False)
+    return bool(out.strip())
+
+
+def content_changes(repo: Path, rev: str, targets: dict[str, str],
+                    current: dict[str, str]) -> dict[str, str]:
+    """What the installed *files* are missing from `rev` — used when provenance is unusable.
+
+    A file the installed copy has and `rev` does not is only removed when `rev`'s history shows an
+    actual deletion: otherwise it is a file from the branch this copy was installed from, not
+    something upstream dropped.
+    """
+    changed: dict[str, str] = {}
+    for path, sha in targets.items():
+        if current.get(path) != sha:
+            changed[path] = "added" if path not in current else "modified"
+    for path in current:
+        if path in targets or path == MARKER:
+            continue
+        if upstream_deleted(repo, rev, path):
+            changed[path] = "deleted"
+    return changed
+
+
 def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
     """Compare the installed copy with `rev` (default: the published main)."""
     git(repo, "fetch", "--quiet", "origin")
@@ -107,19 +134,21 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
                         check=False).strip() or 0)
         behind = int(git(repo, "rev-list", "--count", f"{installed_commit}..{upstream}",
                         check=False).strip() or 0)
-        status = "ahead" if ahead and not behind else "behind" if behind else "same"
-        same_tree = False
         if ahead and behind:
-            # A rebase rewrites commits without changing files: identical tree means "the same
-            # install, different history", not a divergence to resolve by hand.
+            # Neither commit contains the other: the recorded commit was rebased away, or the
+            # install came from a branch that has moved on. The marker is provenance only — the
+            # files on disk are what matters, so reconcile by content.
             same_tree = subprocess.run(
                 ["git", "-C", str(repo), "diff", "--quiet", installed_commit, upstream],
                 capture_output=True).returncode == 0
-            status = "same" if same_tree else "diverged"
-        # An installed copy taken from a branch is ahead of main: its extra files are not
-        # deletions to install. Behind means a straight replay; diverged means neither side
-        # contains the other, and any file list would be a guess (usually a revert).
-        if behind and not ahead:
+            status = "same" if same_tree else "stale"
+            if not same_tree:
+                changed = content_changes(repo, upstream, targets, current)
+                status = "stale" if changed else "same"
+        elif ahead:
+            status = "ahead"
+        elif behind:
+            status = "behind"
             out = git(repo, "diff", "--name-status", "--no-renames",
                       f"{installed_commit}..{upstream}", check=False)
             for line in out.splitlines():
@@ -130,13 +159,10 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
                 if path == ".gitignore" or set(Path(path).parts) & SKIP_PARTS:
                     continue
                 changed[path] = {"A": "added", "M": "modified", "D": "deleted"}.get(kind[0], "changed")
+        else:
+            status = "same"
     else:
-        for path, sha in targets.items():
-            if current.get(path) != sha:
-                changed[path] = "added" if path not in current else "modified"
-        for path in current:
-            if path not in targets and path != MARKER:
-                changed[path] = "deleted"
+        changed = content_changes(repo, upstream, targets, current)
         status = "behind" if changed else "same"
 
     local_edits = {p: "modified locally" for p, sha in current.items()
@@ -160,8 +186,6 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
 
 
 def apply(repo: Path, skill: Path, result: dict, force: bool) -> dict:
-    if result["status"] == "diverged":
-        raise SystemExit("installed copy and the target ref diverged; merge or rebase first")
     if result["local_edits"] and not force:
         raise SystemExit("refusing to overwrite local edits (use --force): "
                          + ", ".join(sorted(result["local_edits"])))
@@ -220,10 +244,12 @@ def main(argv: list[str]) -> int:
         if result["status"] == "ahead":
             print(f"installed copy is ahead of {args.rev} by {result['ahead_commits']} commit(s) "
                   f"({result['installed_commit'][:7]}) — a branch install, nothing to pull")
-        elif result["status"] == "diverged":
-            print(f"diverged: installed has {result['ahead_commits']} commit(s) not in {args.rev}, "
-                  f"{args.rev} has {result['behind_commits']} not in the install — merge or rebase, "
-                  "then check again")
+        elif result["status"] == "stale":
+            print(f"{len(result['changed'])} file(s) differ from {args.rev} ({result['upstream_commit'][:7]}); "
+                  f"the recorded commit {result['installed_commit'][:7]} is not in its history "
+                  "(rebased install) — reconciling by file content")
+            for path, kind in sorted(result["changed"].items()):
+                print(f"  {kind:<9} {path}")
         elif result["up_to_date"]:
             print(f"up to date: {skill} matches {args.rev} ({result['upstream_commit'][:7]})")
             if result.get("same_tree") and result["installed_commit"] != result["upstream_commit"]:
@@ -246,8 +272,6 @@ def main(argv: list[str]) -> int:
 
     if applied:
         return 0
-    if result["status"] == "diverged":
-        return 13
     if result["local_edits"]:
         return 11
     return 0 if result["up_to_date"] else 10

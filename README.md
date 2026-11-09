@@ -173,8 +173,9 @@ python3 scripts/skill_updates.py --apply    # install it
 ```
 
 The install records its commit and per-file hashes in `.skill-install.json`; local edits block
-`--apply` until `--force`, and a copy installed from a branch reports "ahead" instead of offering to
-revert it.
+`--apply` until `--force`, a copy installed from a branch reports "ahead" instead of offering to
+revert it, and a rebased install (marker commit gone from history) is reconciled by file content
+without deleting files the target never had.
 
 ## Using it as an agent skill
 

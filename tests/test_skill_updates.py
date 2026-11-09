@@ -143,46 +143,31 @@ class SkillUpdates(unittest.TestCase):
         self.assertEqual(result["behind_commits"], 0)
         self.assertEqual(result["changed"], {}, "a branch install must not look like a revert")
 
-    def test_diverged_install_is_reported_without_a_file_list(self):
+    def test_a_stale_marker_reconciles_by_content_and_keeps_branch_files(self):
+        # The install comes from a side branch; main then moves on independently.
         self.up.branch("side")
         self.up.write("scripts/side.py", "print('side')\n")
         side = self.up.commit("side work")
         self.up.checkout("main")
         self.up.write("README.md", "main moved on\n")
+        self.up.remove("scripts/doomed.py")
         self.up.commit("main work")
 
         self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
                                                     str(self.skill), "--rev", side, "--apply"]), 0)
-        result = skill_updates.check(self.up.path, self.skill, "main")
-        self.assertEqual(result["status"], "diverged")
-        self.assertEqual(result["changed"], {}, "a diverged install must not list a revert")
 
         result = skill_updates.check(self.up.path, self.skill, "main")
-        self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
-                                                    str(self.skill), "--rev", "main"]), 13)
-        with self.assertRaises(SystemExit):
-            skill_updates.apply(self.up.path, self.skill, result, force=True)
+        self.assertEqual(result["status"], "stale")
+        self.assertEqual(result["changed"],
+                         {"README.md": "modified", "scripts/doomed.py": "deleted"},
+                         "a file only the branch had must not be listed as deleted")
 
-    def test_a_rebase_with_identical_files_is_not_a_divergence(self):
-        # Installed from `side`; main is rebuilt on the same base with the same content.
-        self.up.branch("side")
-        run(self.up.path, "commit", "--allow-empty", "-m", "empty side commit")
-        side = run(self.up.path, "rev-parse", "HEAD").strip()
-        self.up.checkout("main")
-        run(self.up.path, "commit", "--allow-empty", "-m", "rebuilt main")
-
-        self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
-                                                    str(self.skill), "--rev", side, "--apply"]), 0)
-        result = skill_updates.check(self.up.path, self.skill, "main")
-        self.assertEqual(result["status"], "same", "identical trees must not be called diverged")
-        self.assertTrue(result["same_tree"])
-        self.assertEqual(result["changed"], {})
-
-        # --apply is then only a re-anchor of the recorded commit
         self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
                                                     str(self.skill), "--rev", "main", "--apply"]), 0)
-        marker = json.loads((self.skill / ".skill-install.json").read_text())
-        self.assertEqual(marker["commit"], run(self.up.path, "rev-parse", "main").strip())
+        self.assertEqual((self.skill / "README.md").read_text(), "main moved on\n")
+        self.assertFalse((self.skill / "scripts/doomed.py").exists())
+        self.assertTrue((self.skill / "scripts/side.py").exists(),
+                        "a branch file survives a reconcile against main")
 
     def test_local_edits_are_reported_and_block_apply(self):
         self.install_v1()

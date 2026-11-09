@@ -253,5 +253,9 @@ python3 scripts/skill_updates.py --json          # machine-readable, for a sched
   — that is how a hand patch on the installed copy survives an update instead of being lost.
 - An install taken from a branch (not `main`) reports **ahead**, not behind: offering to "update"
   it would revert the branch. Compare it with `--rev <branch>` instead.
+- If the recorded commit is not in the target's history at all (the branch was rebased, so the
+  marker points at a rewritten commit), the check reconciles by **file content** and only deletes a
+  file when the target's history shows a real deletion — a file that only existed on the branch
+  survives.
 - After applying, run the suite from the installed directory: the copy is what the next session
   loads, and a broken copy fails later, in a task, not here.

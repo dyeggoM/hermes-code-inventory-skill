@@ -126,42 +126,50 @@ def run_cs(c,rid,root,rels,hashes,warnings,dn,analyzer):
   p=subprocess.run([dn,str(analyzer),"analyze-file","--root",str(root),"--file",str(root/rel)],capture_output=True,text=True)
   if p.returncode:
    warnings.append(rel+": analyzer exited "+str(p.returncode)+": "+(p.stderr.strip() or "no stderr")[:300])
-   diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed");continue
+   diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
   try: data=json.loads(p.stdout)
   except Exception as e:
-   warnings.append(rel+": invalid analyzer JSON: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed");continue
+   warnings.append(rel+": invalid analyzer JSON: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
   try:
    with c:
     apply_file(c,rid,rel,fnode,data);mark(c,rel,SEM_OK,hashes[rel])
   except Exception as e:
-   warnings.append(rel+": apply failed, previous rows kept: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed")
+   warnings.append(rel+": apply failed, previous rows kept: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel))
 def run_project(c,rid,root,lang,rels,hashes,warnings):
  argv=analyzer_cmd(lang,root)
  if argv is None:
   fail_group(c,rid,rels,warnings,lang+": no analyzer available (see references/analyzer-contract.md)",hashes,"unavailable");return False
  p=subprocess.run(argv,capture_output=True,text=True)
  if p.returncode:
-  fail_group(c,rid,rels,warnings,lang+": analyzer exited "+str(p.returncode)+": "+(p.stderr.strip() or "no stderr")[:300],hashes,"failed");return False
+  fail_group(c,rid,rels,warnings,lang+": analyzer exited "+str(p.returncode)+": "+(p.stderr.strip() or "no stderr")[:300],hashes,"failed");return True
  try: data=json.loads(p.stdout)
  except Exception as e:
-  fail_group(c,rid,rels,warnings,lang+": invalid analyzer JSON: "+str(e),hashes,"failed");return False
+  fail_group(c,rid,rels,warnings,lang+": invalid analyzer JSON: "+str(e),hashes,"failed");return True
  entries={}
  for e in data.get("files",[]):
   if isinstance(e,dict) and isinstance(e.get("path"),str): entries[e["path"].replace(os.sep,"/")]=e
+ def errors(entry):
+  return [d for d in (entry.get("diagnostics") or []) if isinstance(d,dict) and d.get("severity")=="error"]
  for rel in rels:
   e=entries.get(rel)
   if e is None:
-   warnings.append(rel+": analyzer returned no entry");diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed");continue
+   warnings.append(rel+": analyzer returned no entry");diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
   fnode=fnode_for(c,rel)
   if fnode is None: warnings.append(rel+": file node missing; skipped");continue
+  errs=errors(e)
   try:
    with c:
-    apply_file(c,rid,rel,fnode,e);mark(c,rel,SEM_OK,hashes[rel])
+    apply_file(c,rid,rel,fnode,e)
+    if errs: mark(c,rel,"failed",hashes.get(rel))
+    else: mark(c,rel,SEM_OK,hashes[rel])
   except Exception as ex:
-   warnings.append(rel+": apply failed, previous rows kept: "+str(ex));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed")
- for e in data.get("files",[]):
-  for d in (e.get("diagnostics") or []):
-   if d.get("severity")=="error": warnings.append(str(e.get("path"))+": "+str(d.get("message",""))[:200])
+   warnings.append(rel+": apply failed, previous rows kept: "+str(ex));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
+  if errs:
+   warnings.append(rel+": "+str(errs[0].get("message",""))[:200]);diag(c,rid,rel,warnings[-1])
+ for path,e in entries.items():
+  if path in rels: continue
+  for d in errors(e):
+   warnings.append(path+": "+str(d.get("message",""))[:200])
  return True
 def sync(a):
  root=Path(a.root).resolve();c=db(root);wanted={a.lang} if getattr(a,"lang",None) else None

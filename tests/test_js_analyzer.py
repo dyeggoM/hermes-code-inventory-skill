@@ -80,5 +80,59 @@ class JsFixture(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stdout)
 
 
+
+@unittest.skipUnless(ready, "js analyzer or its node_modules not installed")
+class JsSemanticStatus(unittest.TestCase):
+    """A file the analyzer could not parse must never be reported as ok.
+
+    v0.4 applied the (partial) analyzer output and marked the file ok, so the warning
+    appeared once and the next sync certified an index that did not contain the file.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "proj"
+        (self.root / "src").mkdir(parents=True)
+        (self.root / "src" / "ok.ts").write_text(
+            "export function fine(x: number) { return x + 1; }\n"
+            "export function caller() { return fine(1); }\n")
+        (self.root / "src" / "broken.ts").write_text("export function oops(  { return 1\n")
+        subprocess.run([sys.executable, str(SCRIPT), "init", "--root", str(self.root)],
+                       check=True, capture_output=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def sync(self):
+        return json.loads(subprocess.run(
+            [sys.executable, str(SCRIPT), "sync", "--root", str(self.root), "--lang", "js"],
+            capture_output=True, text=True, check=True).stdout)
+
+    def status(self):
+        con = sqlite3.connect(self.root / ".code-inventory" / "inventory.sqlite3")
+        try:
+            return dict(con.execute("select path, semantic_status from file_state"))
+        finally:
+            con.close()
+
+    def test_parse_failure_is_not_ok(self):
+        first = self.sync()
+        self.assertEqual(first["analyzer_status"], "partial", first["warnings"])
+        self.assertEqual(self.status()["src/broken.ts"], "failed")
+
+    def test_parse_failure_stays_visible_on_next_sync(self):
+        self.sync()
+        second = self.sync()
+        self.assertEqual(second["analyzer_status"], "partial", second["warnings"])
+        self.assertTrue(any("broken.ts" in w for w in second["warnings"]), second["warnings"])
+        self.assertEqual(self.status()["src/broken.ts"], "failed")
+
+    def test_verify_lists_file_without_semantics(self):
+        self.sync()
+        out = json.loads(subprocess.run(
+            [sys.executable, str(SCRIPT), "verify", "--root", str(self.root)],
+            capture_output=True, text=True).stdout)
+        self.assertIn("src/broken.ts", out["files_without_semantics"])
+
 if __name__ == "__main__":
     unittest.main()

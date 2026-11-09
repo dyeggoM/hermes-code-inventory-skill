@@ -161,6 +161,16 @@ Coordinator tests need no SDK: they shadow `dotnet` with a stub that emits analy
 hashing, description preservation, transactional apply, retry status and call cleanup are
 deterministic. Per-language suites skip themselves when their analyzer is absent.
 
+## Committing the document
+
+`--no-stamp` omits the timestamp and commit from the header, so rendering the same source twice
+writes the same bytes — the difference between a committed inventory that only changes with the code
+and one that changes on every run:
+
+```bash
+python3 scripts/ai_inventory.py --root . --no-stamp
+```
+
 ## Keeping an installed copy current
 
 When the skill is installed as files (an agent profile, a plugin directory), it drifts from `main`

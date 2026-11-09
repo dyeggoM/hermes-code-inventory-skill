@@ -71,6 +71,11 @@ from instead of the repository:
 and callees by `path:line` — that is the unit to hand a model together with the task. `--budget`
 caps it.
 
+**Commit the document, keep it honest.** `--no-stamp` drops the timestamp/commit line from the
+header, so rendering the same code twice produces a byte-identical file. Use it when
+`AI_INVENTORY.md` is committed (a pre-commit hook is the usual place): the diff then only moves when
+the code does, instead of changing on every run.
+
 **Large repos split automatically.** When the single document would exceed `--max-chars`, the same
 path becomes a router index and each module gets `inventory/<module>.md`: over `--depth 2` path
 segments, refined by sub-folder, then per file whenever a group still holds more than ~120 symbols.

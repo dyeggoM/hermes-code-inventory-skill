@@ -1,7 +1,7 @@
 ---
 name: code-inventory
 description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.4.0
+version: 0.4.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -34,10 +34,14 @@ is `references/analyzer-contract.md` — read it before adding a language.
 ## Workflow
 
 1. `python3 scripts/inventory.py init --root /path/to/project`
+   The index is not source: add `<project>/.code-inventory/` to that project's `.gitignore` (and
+   `AI_INVENTORY.md` / `inventory/` if you render there), or its `git status` fills with database files.
 2. Make each language's analyzer available (only the ones you need):
    - *C#* — build once and copy into the project:
      `dotnet build analyzers/csharp/CodeInventory.Analyzer.csproj -c Release` then
      `mkdir -p <project>/.code-inventory/analyzer && cp -a analyzers/csharp/bin/Release/net8.0/. <project>/.code-inventory/analyzer/`
+     The project keeps its own copy of the DLL: after rebuilding, re-copy and `sync --lang cs --full`
+     once, or it silently re-indexes with the previous analyzer.
    - *Python* — nothing to install; `analyzers/python/python_analyzer.py` runs on the stdlib.
    - *JS/TS/Vue* — one-time `npm install --prefix analyzers/js` (pulls `@babel/parser`, a few MB).
 3. `python3 scripts/inventory.py sync --root /path/to/project` (add `--lang cs|py|js` to limit)
@@ -75,13 +79,20 @@ callers that live in other modules. Read the index, then one part — never the 
 
 Rules the generator follows, keep them if you change it:
 
-- **Never invent a purpose.** Only doc comments are used; blank stays blank.
+- **Never invent a purpose.** Only comments in the source are used — C# `///`, JS `/** */` or `//`,
+  Python PEP 257 docstrings — and a blank stays blank.
 - **Never fill an edge.** Impact comes from resolved symbol keys only.
 - **Keep the entry point stable.** `AI_INVENTORY.md` is the document for a small repo and the
   index for a large one; `--split never` forces one file, `--max-chars` decides.
 - Type declarations live in `nodes`, not `functions`: `ai_inventory.py` pulls them from `nodes` and
   resolves their line from source, so do not assume a symbol is missing just because it has no
   `functions` row.
+- **Derive the language from the symbol key, not from a cs/js boolean.** Three namespaces coexist
+  (`py:`, `js:`, Roslyn doc IDs like `M:`); a two-way test silently labels every Python symbol as
+  JS/TS/Vue in the header and in the split index.
+- **External edges may carry a callee key that is not in `functions`.** Filter by
+  `callee_symbol_key IS NOT NULL` before listing callees in `--context`, or the pack crashes on a
+  framework call while the document path keeps working.
 
 ## Symbol keys
 
@@ -105,6 +116,18 @@ survive a rescan.
   interpreting that as "the code has no calls".
 - JS/TS: Node 18+ and `npm install --prefix analyzers/js`. Without it those files stay `unavailable`
   with a clear warning rather than silently indexing nothing.
+
+## Reusing an index from an earlier session
+
+Do not trust a map you did not just re-check. On returning to an indexed project:
+
+1. `sync` on each root you rely on. `changed_files: 0` **and** `retried_files: 0` is the evidence the
+   rows match the working tree; anything else means re-read the affected symbols before advising.
+2. `verify` — `ok: true` with no orphans or dangling edges. A `files_without_semantics` list is not
+   a failure, but those files are unindexed: say so instead of counting them as covered.
+3. For C#, compare the project-local `analyzer/CodeInventory.Analyzer.dll` against the skill's
+   `analyzers/csharp/Program.cs`. An older DLL still reports `analyzer_status: ok` while resolving
+   less, so a rebuild means copy + `sync --lang cs --full`.
 
 ## Incremental sync
 
@@ -182,3 +205,31 @@ Per-language suites skip themselves when the analyzer is absent: `test_integrati
 `references/schema.md` documents the tables and `semantic_status`; `references/roadmap.md` separates
 verified behaviour from deliberate gaps; `references/analyzer-contract.md` is the interface a new
 language must implement.
+
+## Maintaining this skill
+
+```
+scripts/            inventory.py (coordinator), ai_inventory.py (renderer)
+analyzers/csharp/   Program.cs + csproj, built as net8.0
+analyzers/python/   python_analyzer.py (stdlib ast)
+analyzers/js/       analyze.js + package.json/lock
+test-scenarios/     csharp/, python/, js/ — the sample trees the integration tests index
+references/         schema, roadmap, setup-dotnet, analyzer-contract
+tests/              coordinator, one suite per analyzer, ai_inventory
+```
+
+One folder per language in both trees; a new language adds `analyzers/<lang>/` and
+`test-scenarios/<lang>/` rather than dropping files beside the coordinator.
+
+After touching an analyzer, the coordinator or the renderer:
+
+1. `python3 -m unittest discover -s tests` — the whole suite, not only the suite you touched; the
+   coordinator tests drive the same paths through a stub `dotnet`.
+2. Any analyzer edit needs `sync --full` (or `--lang <l> --full`) on every project you rely on:
+   the hashes are of **source files**, not of the analyzer, so a plain `sync` reports
+   `changed_files: 0` and re-analyses nothing while the old rows keep looking healthy.
+3. For C#, rebuild and re-copy the project-local DLL (workflow step 2) before that `--full sync` —
+   a stale copy still reports `analyzer_status: ok` while resolving less.
+4. The published mirror is `github.com/dyeggoM/hermes-code-inventory-skill`; copy the changed files
+   over and push, then run the suite from a **fresh clone**. A green run in the working copy is not
+   proof that the published tree is complete — fixtures and lockfiles are exactly what goes missing.

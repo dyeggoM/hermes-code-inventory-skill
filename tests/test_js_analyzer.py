@@ -79,6 +79,20 @@ class JsFixture(unittest.TestCase):
                            capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stdout)
 
+    def test_class_field_without_initializer(self):
+        """A class field declared without a value must not abort the analyzer.
+
+        v0.4 read `member.value.start` unconditionally, so one uninitialized field
+        killed the whole run and every file in the project stayed unindexed.
+        """
+        nodes = {(r[0], r[1]) for r in self.con.execute(
+            "select name, kind from nodes where path='src/util/format.ts'")}
+        self.assertIn(("DateFormatter", "class"), nodes)
+        self.assertIn(("locale", "field"), nodes)
+        self.assertIn(("options", "field"), nodes)
+        keys = {r[0] for r in self.con.execute("select symbol_key from functions")}
+        self.assertIn("js:src/util/format:DateFormatter.format", keys)
+
 
 if __name__ == "__main__":
     unittest.main()

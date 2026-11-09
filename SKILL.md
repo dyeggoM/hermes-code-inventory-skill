@@ -209,7 +209,7 @@ language must implement.
 ## Maintaining this skill
 
 ```
-scripts/            inventory.py (coordinator), ai_inventory.py (renderer)
+scripts/            inventory.py (coordinator), ai_inventory.py (renderer), skill_updates.py
 analyzers/csharp/   Program.cs + csproj, built as net8.0
 analyzers/python/   python_analyzer.py (stdlib ast)
 analyzers/js/       analyze.js + package.json/lock
@@ -233,3 +233,25 @@ After touching an analyzer, the coordinator or the renderer:
 4. The published mirror is `github.com/dyeggoM/hermes-code-inventory-skill`; copy the changed files
    over and push, then run the suite from a **fresh clone**. A green run in the working copy is not
    proof that the published tree is complete — fixtures and lockfiles are exactly what goes missing.
+
+### Updating an installed copy
+
+An installed skill is plain files, so it drifts from `main` silently. `scripts/skill_updates.py`
+answers "is this copy behind?" and writes nothing without `--apply`, which is the approval step:
+
+```
+python3 scripts/skill_updates.py                 # list what is behind (exit 10 when it is)
+python3 scripts/skill_updates.py --apply         # install it, then re-run the suite
+python3 scripts/skill_updates.py --json          # machine-readable, for a scheduler
+```
+
+- The install records where it came from in `.skill-install.json` (commit + sha256 per file). Without
+  that marker the script falls back to comparing file contents against `main`.
+- `behind` lists added/modified/deleted files from `git diff <installed>..<ref>`; deletions remove the
+  file rather than leaving a stale copy behind.
+- A file edited after installation is reported as a *local edit* and blocks `--apply` until `--force`
+  — that is how a hand patch on the installed copy survives an update instead of being lost.
+- An install taken from a branch (not `main`) reports **ahead**, not behind: offering to "update"
+  it would revert the branch. Compare it with `--rev <branch>` instead.
+- After applying, run the suite from the installed directory: the copy is what the next session
+  loads, and a broken copy fails later, in a task, not here.

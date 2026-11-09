@@ -161,6 +161,21 @@ Coordinator tests need no SDK: they shadow `dotnet` with a stub that emits analy
 hashing, description preservation, transactional apply, retry status and call cleanup are
 deterministic. Per-language suites skip themselves when their analyzer is absent.
 
+## Keeping an installed copy current
+
+When the skill is installed as files (an agent profile, a plugin directory), it drifts from `main`
+without saying so. `scripts/skill_updates.py` compares the installed copy with the published branch,
+lists what changed, and only writes with `--apply`:
+
+```bash
+python3 scripts/skill_updates.py            # exit 10 when something is pending
+python3 scripts/skill_updates.py --apply    # install it
+```
+
+The install records its commit and per-file hashes in `.skill-install.json`; local edits block
+`--apply` until `--force`, and a copy installed from a branch reports "ahead" instead of offering to
+revert it.
+
 ## Using it as an agent skill
 
 `SKILL.md` is the agent-facing instruction file (front-matter + workflow) — drop this repository in

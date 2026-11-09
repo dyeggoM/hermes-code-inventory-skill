@@ -53,9 +53,11 @@ change beyond the extension map.
 - **Migrations.** Only the additive `semantic_status` column is migrated. No versioned schema
   migration path.
 - **Multi-project solutions, custom MSBuild imports, linked files, source generators** are untested.
-- **Vendored/generated trees** are skipped by directory name (`build`, `dist`, `vendor`, `obj`, …).
-  A real package called `build/` will be missed — pass a root that does not contain it, or extend
-  `IGNORE` deliberately.
+- **Vendored/generated trees** are skipped by directory name (`build`, `dist`, `vendor`, `out`,
+  `target`, `.quasar`, `.nuxt`, `.svelte-kit`, `obj`, `bin`, `node_modules`, …). A real package
+  called `build/` will be missed — pass a root that does not contain it, or extend `IGNORE`
+  deliberately. Generated tool output (Quasar's `.quasar/dev-spa`, Nuxt's `.nuxt`) must stay out:
+  it is not code anyone edits, and it silently inflates every file and symbol count.
 
 ## Cost
 

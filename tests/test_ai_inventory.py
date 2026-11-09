@@ -122,6 +122,25 @@ class SingleDocument(Base):
         self.assertEqual(payload["unresolved"][0]["name"], "open")
 
 
+class CommittedDocument(Base):
+    def test_no_stamp_makes_the_document_byte_identical_across_runs(self):
+        out = self.root / "AI_INVENTORY.md"
+        self.render("--no-stamp", "--no-json")
+        first = out.read_text(encoding="utf-8")
+        self.assertNotIn("UTC", first.splitlines()[2],
+                         "a committed inventory must not carry a timestamp")
+
+        self.render("--no-stamp", "--no-json")
+        self.assertEqual(first, out.read_text(encoding="utf-8"),
+                         "re-rendering the same code must not change the file")
+
+    def test_the_default_header_keeps_its_stamp(self):
+        self.render("--no-json")
+        header = (self.root / "AI_INVENTORY.md").read_text(encoding="utf-8").splitlines()[2]
+        self.assertIn("UTC", header)
+        self.assertIn("Generated", header)
+
+
 class SplitMode(Base):
     def test_over_budget_writes_index_and_parts(self):
         summary = json.loads(self.render("--max-chars", "200"))

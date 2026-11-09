@@ -13,7 +13,8 @@ Usage
 Defaults: --repo $CODE_INVENTORY_REPO or ~/projects/code-inventory,
           --skill $CODE_INVENTORY_SKILL or ~/.hermes/skills/software-development/code-inventory
 
-Exit codes: 0 up to date, 10 update available, 11 local edits would be overwritten, 2 error.
+Exit codes: 0 up to date (or applied), 10 update available, 11 local edits would be overwritten,
+13 installed copy and the target ref diverged, 2 error.
 """
 
 from __future__ import annotations
@@ -106,9 +107,12 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
         behind = int(git(repo, "rev-list", "--count", f"{installed_commit}..{upstream}",
                         check=False).strip() or 0)
         status = "ahead" if ahead and not behind else "behind" if behind else "same"
+        if ahead and behind:
+            status = "diverged"
         # An installed copy taken from a branch is ahead of main: its extra files are not
-        # deletions to install, so only a real "behind" produces a change list.
-        if behind:
+        # deletions to install. Behind means a straight replay; diverged means neither side
+        # contains the other, and any file list would be a guess (usually a revert).
+        if behind and not ahead:
             out = git(repo, "diff", "--name-status", "--no-renames",
                       f"{installed_commit}..{upstream}", check=False)
             for line in out.splitlines():
@@ -148,6 +152,8 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
 
 
 def apply(repo: Path, skill: Path, result: dict, force: bool) -> dict:
+    if result["status"] == "diverged":
+        raise SystemExit("installed copy and the target ref diverged; merge or rebase first")
     if result["local_edits"] and not force:
         raise SystemExit("refusing to overwrite local edits (use --force): "
                          + ", ".join(sorted(result["local_edits"])))
@@ -206,6 +212,10 @@ def main(argv: list[str]) -> int:
         if result["status"] == "ahead":
             print(f"installed copy is ahead of {args.rev} by {result['ahead_commits']} commit(s) "
                   f"({result['installed_commit'][:7]}) — a branch install, nothing to pull")
+        elif result["status"] == "diverged":
+            print(f"diverged: installed has {result['ahead_commits']} commit(s) not in {args.rev}, "
+                  f"{args.rev} has {result['behind_commits']} not in the install — merge or rebase, "
+                  "then check again")
         elif result["up_to_date"]:
             print(f"up to date: {skill} matches {args.rev} ({result['upstream_commit'][:7]})")
         else:
@@ -226,6 +236,8 @@ def main(argv: list[str]) -> int:
 
     if applied:
         return 0
+    if result["status"] == "diverged":
+        return 13
     if result["local_edits"]:
         return 11
     return 0 if result["up_to_date"] else 10

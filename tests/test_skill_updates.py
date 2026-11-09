@@ -52,6 +52,12 @@ class Upstream:
     def remove(self, rel: str):
         (self.path / rel).unlink()
 
+    def checkout(self, ref: str):
+        run(self.path, "checkout", ref)
+
+    def branch(self, name: str):
+        run(self.path, "checkout", "-b", name)
+
 
 class SkillUpdates(unittest.TestCase):
     def setUp(self):
@@ -136,6 +142,26 @@ class SkillUpdates(unittest.TestCase):
         self.assertEqual(result["ahead_commits"], 1)
         self.assertEqual(result["behind_commits"], 0)
         self.assertEqual(result["changed"], {}, "a branch install must not look like a revert")
+
+    def test_diverged_install_is_reported_without_a_file_list(self):
+        self.up.branch("side")
+        self.up.write("scripts/side.py", "print('side')\n")
+        side = self.up.commit("side work")
+        self.up.checkout("main")
+        self.up.write("README.md", "main moved on\n")
+        self.up.commit("main work")
+
+        self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
+                                                    str(self.skill), "--rev", side, "--apply"]), 0)
+        result = skill_updates.check(self.up.path, self.skill, "main")
+        self.assertEqual(result["status"], "diverged")
+        self.assertEqual(result["changed"], {}, "a diverged install must not list a revert")
+
+        result = skill_updates.check(self.up.path, self.skill, "main")
+        self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
+                                                    str(self.skill), "--rev", "main"]), 13)
+        with self.assertRaises(SystemExit):
+            skill_updates.apply(self.up.path, self.skill, result, force=True)
 
     def test_local_edits_are_reported_and_block_apply(self):
         self.install_v1()

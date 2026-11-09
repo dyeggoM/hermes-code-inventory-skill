@@ -1,7 +1,7 @@
 """Integration test: real Roslyn analyzer against the sample project.
 
 Skipped when no .NET SDK is reachable. Builds the analyzer, copies it into a scratch copy of
-`sample-project/`, syncs, and asserts the semantic facts M2 promises: declarations, overloads with
+`test-scenarios/csharp/`, syncs, and asserts the semantic facts M2 promises: declarations, overloads with
 distinct identities, and a cross-file call edge.
 """
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "inventory.py"
-SAMPLE = SKILL / "sample-project"
+SAMPLE = SKILL / "test-scenarios" / "csharp"
 
 
 def dotnet():
@@ -37,14 +37,17 @@ class SampleProject(unittest.TestCase):
         tmp = Path(cls._tmp.name)
         cls.root = tmp / "proj"
         shutil.copytree(SAMPLE, cls.root)
+        exe = dotnet()
+        if not exe:
+            raise unittest.SkipTest("no .NET SDK available")
         env = dict(os.environ, DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1")
-        out = subprocess.run([dotnet(), "build", str(SKILL / "analyzer" / "CodeInventory.Analyzer.csproj"),
+        out = subprocess.run([exe, "build", str(SKILL / "analyzers" / "csharp" / "CodeInventory.Analyzer.csproj"),
                               "-c", "Release"], capture_output=True, text=True, env=env, timeout=600)
         if out.returncode != 0:
             raise unittest.SkipTest("analyzer build failed: " + out.stdout[-400:])
         d = cls.root / ".code-inventory" / "analyzer"
         d.mkdir(parents=True, exist_ok=True)
-        src = SKILL / "analyzer" / "bin" / "Release" / "net8.0"
+        src = SKILL / "analyzers" / "csharp" / "bin" / "Release" / "net8.0"
         for item in src.iterdir():
             if item.is_file():
                 shutil.copy2(item, d / item.name)

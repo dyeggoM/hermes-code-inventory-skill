@@ -100,7 +100,7 @@ def analyzer_cmd(lang,root):
  """Project-wide analyzers ship with the skill; C# uses the copy inside the project."""
  skill=Path(__file__).resolve().parents[1]
  if lang=="py":
-  p=skill/"scripts/analyzers/python_analyzer.py"
+  p=skill/"analyzers/python/python_analyzer.py"
   return [sys.executable,str(p),"analyze-project","--root",str(root)] if p.exists() else None
  if lang=="js":
   p=skill/"analyzers/js/analyze.js";n=which_tool("node")

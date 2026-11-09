@@ -34,9 +34,9 @@ is enough to analyse net9.0 solutions — the analyzer itself keeps running on t
 ## Build the analyzer
 
 ```bash
-dotnet build analyzer/CodeInventory.Analyzer.csproj -c Release
+dotnet build analyzers/csharp/CodeInventory.Analyzer.csproj -c Release
 mkdir -p <project>/.code-inventory/analyzer
-cp -a analyzer/bin/Release/net8.0/. <project>/.code-inventory/analyzer/
+cp -a analyzers/csharp/bin/Release/net8.0/. <project>/.code-inventory/analyzer/
 ```
 
 First build restores three NuGet packages (`Microsoft.Build.Locator 1.7.8`,

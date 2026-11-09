@@ -36,9 +36,9 @@ is `references/analyzer-contract.md` — read it before adding a language.
 1. `python3 scripts/inventory.py init --root /path/to/project`
 2. Make each language's analyzer available (only the ones you need):
    - *C#* — build once and copy into the project:
-     `dotnet build analyzer/CodeInventory.Analyzer.csproj -c Release` then
-     `mkdir -p <project>/.code-inventory/analyzer && cp -a analyzer/bin/Release/net8.0/. <project>/.code-inventory/analyzer/`
-   - *Python* — nothing to install; `scripts/analyzers/python_analyzer.py` runs on the stdlib.
+     `dotnet build analyzers/csharp/CodeInventory.Analyzer.csproj -c Release` then
+     `mkdir -p <project>/.code-inventory/analyzer && cp -a analyzers/csharp/bin/Release/net8.0/. <project>/.code-inventory/analyzer/`
+   - *Python* — nothing to install; `analyzers/python/python_analyzer.py` runs on the stdlib.
    - *JS/TS/Vue* — one-time `npm install --prefix analyzers/js` (pulls `@babel/parser`, a few MB).
 3. `python3 scripts/inventory.py sync --root /path/to/project` (add `--lang cs|py|js` to limit)
 4. Query: `status`, `search --query X [--lang]`, `callers --symbol K`, `callees --symbol K`,

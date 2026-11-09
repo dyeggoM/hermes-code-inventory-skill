@@ -1,4 +1,4 @@
-"""Python analyzer integration: skipped until scripts/analyzers/python_analyzer.py exists."""
+"""Python analyzer integration: skipped until analyzers/python/python_analyzer.py exists."""
 import json
 import shutil
 import sqlite3
@@ -10,8 +10,8 @@ from pathlib import Path
 
 SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "inventory.py"
-ANALYZER = SKILL / "scripts" / "analyzers" / "python_analyzer.py"
-FIXTURE = SKILL / "fixtures" / "python-sample"
+ANALYZER = SKILL / "analyzers" / "python" / "python_analyzer.py"
+FIXTURE = SKILL / "test-scenarios" / "python"
 
 
 @unittest.skipUnless(ANALYZER.exists(), "python analyzer not installed")

@@ -12,7 +12,7 @@ SKILL = Path(__file__).resolve().parents[1]
 SCRIPT = SKILL / "scripts" / "inventory.py"
 JS_DIR = SKILL / "analyzers" / "js"
 ANALYZER = JS_DIR / "analyze.js"
-FIXTURE = SKILL / "fixtures" / "js-sample"
+FIXTURE = SKILL / "test-scenarios" / "js"
 
 
 def node():

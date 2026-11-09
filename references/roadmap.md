@@ -4,8 +4,8 @@
 
 | Language | Analyzer | Mode | Notes |
 |---|---|---|---|
-| C# | `analyzer/` (Roslyn/MSBuild, built as net8.0) | per file | SDK must match the project TFM; recursive `.sln`/`.csproj` discovery |
-| Python | `scripts/analyzers/python_analyzer.py` (stdlib `ast`) | project-wide | no dependencies; resolves imports, `self.`, module aliases |
+| C# | `analyzers/csharp/` (Roslyn/MSBuild, built as net8.0) | per file | SDK must match the project TFM; recursive `.sln`/`.csproj` discovery |
+| Python | `analyzers/python/python_analyzer.py` (stdlib `ast`) | project-wide | no dependencies; resolves imports, `self.`, module aliases |
 | JS/TS/JSX/TSX | `analyzers/js/analyze.js` (`@babel/parser`) | project-wide | `npm install --prefix analyzers/js` once |
 | Vue SFC | same JS analyzer | project-wide | `<script>` / `<script setup>` only; templates unparsed |
 | Angular | same JS analyzer | project-wide | decorators emitted as declarations |

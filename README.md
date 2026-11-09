@@ -35,9 +35,9 @@ so the model can request exactly the code it needs.
 For C#, build the analyzer once and copy it into the project you index:
 
 ```bash
-dotnet build analyzer/CodeInventory.Analyzer.csproj -c Release
+dotnet build analyzers/csharp/CodeInventory.Analyzer.csproj -c Release
 mkdir -p <project>/.code-inventory/analyzer
-cp -a analyzer/bin/Release/net8.0/. <project>/.code-inventory/analyzer/
+cp -a analyzers/csharp/bin/Release/net8.0/. <project>/.code-inventory/analyzer/
 ```
 
 `references/setup-dotnet.md` covers a no-root SDK install and what happens when the SDK is older than
@@ -96,11 +96,16 @@ Rules the renderer keeps, by design:
 ## Design
 
 ```
-scripts/inventory.py            coordinator: discovery, hashing, SQLite, hierarchy, incremental sync
-scripts/ai_inventory.py         renderer: Markdown + JSON, routes, impact, context packs, splitting
-scripts/analyzers/*.py          Python analyzer (stdlib)
-analyzers/js/analyze.js         JS/TS/Vue analyzer (project-wide, one pass)
-analyzer/Program.cs             C# analyzer (Roslyn/MSBuild, one project load per file)
+scripts/inventory.py             coordinator: discovery, hashing, SQLite, hierarchy, incremental sync
+scripts/ai_inventory.py          renderer: Markdown + JSON, routes, impact, context packs, splitting
+
+analyzers/csharp/Program.cs      C# analyzer (Roslyn/MSBuild, one project load per file)
+analyzers/python/python_analyzer.py   Python analyzer (stdlib ast, project-wide)
+analyzers/js/analyze.js          JS/TS/Vue analyzer (Babel, project-wide)
+
+test-scenarios/csharp/           sample solution used by the .NET integration test
+test-scenarios/python/           sample package used by the Python test
+test-scenarios/js/               sample SFC/TS tree used by the JS test
 ```
 
 One coordinator, one analyzer per language. Each analyzer parses its language and resolves edges;

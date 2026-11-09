@@ -1,0 +1,10 @@
+{
+  "name": "code-inventory-js-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Project-wide JS/TS/Vue/Angular analyzer for code-inventory",
+  "main": "analyze.js",
+  "dependencies": {
+    "@babel/parser": "^7.28.4"
+  }
+}

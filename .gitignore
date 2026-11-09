@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (analyzer dependencies are installed, not committed)
+node_modules/
+
+# .NET build output
+bin/
+obj/
+
+# Local indexes and rendered documents
+.code-inventory/
+AI_INVENTORY.md
+ai_inventory.json
+inventory/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

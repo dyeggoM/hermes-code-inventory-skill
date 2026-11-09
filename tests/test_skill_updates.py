@@ -163,6 +163,27 @@ class SkillUpdates(unittest.TestCase):
         with self.assertRaises(SystemExit):
             skill_updates.apply(self.up.path, self.skill, result, force=True)
 
+    def test_a_rebase_with_identical_files_is_not_a_divergence(self):
+        # Installed from `side`; main is rebuilt on the same base with the same content.
+        self.up.branch("side")
+        run(self.up.path, "commit", "--allow-empty", "-m", "empty side commit")
+        side = run(self.up.path, "rev-parse", "HEAD").strip()
+        self.up.checkout("main")
+        run(self.up.path, "commit", "--allow-empty", "-m", "rebuilt main")
+
+        self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
+                                                    str(self.skill), "--rev", side, "--apply"]), 0)
+        result = skill_updates.check(self.up.path, self.skill, "main")
+        self.assertEqual(result["status"], "same", "identical trees must not be called diverged")
+        self.assertTrue(result["same_tree"])
+        self.assertEqual(result["changed"], {})
+
+        # --apply is then only a re-anchor of the recorded commit
+        self.assertEqual(quiet(skill_updates.main, ["--repo", str(self.up.path), "--skill",
+                                                    str(self.skill), "--rev", "main", "--apply"]), 0)
+        marker = json.loads((self.skill / ".skill-install.json").read_text())
+        self.assertEqual(marker["commit"], run(self.up.path, "rev-parse", "main").strip())
+
     def test_local_edits_are_reported_and_block_apply(self):
         self.install_v1()
         (self.skill / "README.md").write_text("edited by hand\n", encoding="utf-8")

@@ -100,6 +100,7 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
 
     changed: dict[str, str] = {}
     ahead = behind = 0
+    same_tree = False
     status = "unmarked"
     if installed_commit and has_commit(repo, installed_commit):
         ahead = int(git(repo, "rev-list", "--count", f"{upstream}..{installed_commit}",
@@ -107,8 +108,14 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
         behind = int(git(repo, "rev-list", "--count", f"{installed_commit}..{upstream}",
                         check=False).strip() or 0)
         status = "ahead" if ahead and not behind else "behind" if behind else "same"
+        same_tree = False
         if ahead and behind:
-            status = "diverged"
+            # A rebase rewrites commits without changing files: identical tree means "the same
+            # install, different history", not a divergence to resolve by hand.
+            same_tree = subprocess.run(
+                ["git", "-C", str(repo), "diff", "--quiet", installed_commit, upstream],
+                capture_output=True).returncode == 0
+            status = "same" if same_tree else "diverged"
         # An installed copy taken from a branch is ahead of main: its extra files are not
         # deletions to install. Behind means a straight replay; diverged means neither side
         # contains the other, and any file list would be a guess (usually a revert).
@@ -141,6 +148,7 @@ def check(repo: Path, skill: Path, rev: str = "origin/main") -> dict:
         "skill": str(skill),
         "rev": rev,
         "status": status,
+        "same_tree": same_tree,
         "installed_commit": installed_commit,
         "upstream_commit": upstream,
         "behind_commits": behind,
@@ -218,6 +226,8 @@ def main(argv: list[str]) -> int:
                   "then check again")
         elif result["up_to_date"]:
             print(f"up to date: {skill} matches {args.rev} ({result['upstream_commit'][:7]})")
+            if result.get("same_tree") and result["installed_commit"] != result["upstream_commit"]:
+                print("  same files, different history (rebased?) — --apply re-anchors the install")
         else:
             print(f"{len(result['changed'])} file(s) to update — {result['behind_commits']} commit(s) behind "
                   f"{args.rev} ({result['upstream_commit'][:7]})")

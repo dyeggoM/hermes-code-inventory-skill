@@ -99,6 +99,18 @@ class Base(unittest.TestCase):
 
 
 class Discovery(Base):
+    def test_generated_tooling_dirs_are_not_indexed(self):
+        # Quasar/Nuxt/Vite scaffolds write generated sources into the project; they are build
+        # output, not code to reason about, and they inflate every count in the rendered document.
+        self.write("src/A.cs", "class A {}")
+        self.write(".quasar/dev-spa/app.js", "console.log('generated')")
+        self.write(".nuxt/app.js", "console.log('generated')")
+        self.write("out/main.js", "console.log('generated')")
+        self.init()
+        out = self.sync()
+        self.assertEqual(out["discovered_files"], 1,
+                         "generated tooling directories must not be discovered")
+
     def test_nested_file_and_incremental(self):
         self.write("src/a/Foo.cs", "class Foo {}")
         self.init()

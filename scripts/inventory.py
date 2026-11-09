@@ -4,7 +4,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 IGNORE={".git",".vs","bin","obj",".code-inventory","node_modules","packages","__pycache__",
-        ".venv","venv",".mypy_cache",".pytest_cache","dist","build",".next","coverage"}
+        ".venv","venv",".mypy_cache",".pytest_cache","dist","build",".next","coverage",
+        ".quasar",".nuxt",".svelte-kit","out","target"}
 LANG_BY_EXT={".cs":"cs",".py":"py",".js":"js",".jsx":"js",".mjs":"js",".cjs":"js",".ts":"js",".tsx":"js",".vue":"js"}
 LANGS=sorted(set(LANG_BY_EXT.values()))
 SCHEMA="""

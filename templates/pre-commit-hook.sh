@@ -67,8 +67,13 @@ echo "$ROOTS" | while IFS=: read -r rel lang; do
 done
 
 # --no-stamp keeps the header stable: identical code renders byte-identical, so the commit carries
-# only the inventory diff the code produced.
-python3 "$inventory/scripts/ai_inventory.py" --root "$root" --no-stamp --no-json >/dev/null
+# only the inventory diff the code produced. The split flags keep the document usable by an agent:
+# a small router index plus one file per module, instead of a single document nobody can afford to
+# open. Change 40000 here if this repository needs bigger or smaller slices.
+python3 "$inventory/scripts/ai_inventory.py" --root "$root" --no-stamp --no-json --max-chars 40000 --split auto >/dev/null
 git add AI_INVENTORY.md
+# the module slices are part of the document: add the ones that exist and any that were removed
+[ -d "$root/inventory" ] && git add "$root/inventory" 2>/dev/null || true
+git add -u -- AI_INVENTORY.md inventory 2>/dev/null || true
 
 echo "pre-commit: AI_INVENTORY.md updated"

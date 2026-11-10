@@ -459,6 +459,9 @@ def render(root: str, data: dict, title: str | None = None, note: str | None = N
       "target (`?`) is framework/dynamic and cannot be traced statically.")
     w("5. **Absence is not proof.** Dynamic dispatch, reflection, templates, generated code and "
       "unsupported languages are not indexed (see *Coverage*). Grep before concluding a symbol is unused.")
+    w("6. **Never paste this document or a whole source file into the conversation as \"context\".** Cite "
+      "`path:line` and read only what the change needs: anything quoted into the prompt is re-sent on "
+      "every later turn.")
     w("")
 
     # ---------------- project map
@@ -808,17 +811,32 @@ def write_split(root: str, data: dict, out: str, depth: int, stamp: bool = True)
     w.append(f"This index routes you to {len(groups)} module documents. Indexed: **{len(syms)} symbols** "
              f"across **{len({s['path'] for s in syms.values()})} files**.")
     w.append("")
-    w.append("## How to use this file")
+    w.append("## How to use this file — mandatory protocol")
     w.append("")
-    w.append("1. Find the module you need below and open **only** that file — do not load the whole set.")
-    w.append("2. Inside it every symbol line carries `path:line`; fetch just that range plus ~10 lines.")
-    w.append("3. Before changing a signature, read the symbol's Impact line — callers from other "
-             "modules are listed there with their own `path:line`.")
-    w.append("4. For one surgical change, prefer the CLI over any document:")
+    w.append("You are an AI agent working in this repository. This index is the map; the module files are "
+             "the territory. Follow these rules in order, they exist because skipping them is expensive:")
+    w.append("")
+    w.append("1. **Start here, not in the code.** Read this index, pick the module below that owns your "
+             "change, and open **only** that module file. Loading every module is the same mistake as "
+             "reading the whole repo.")
+    w.append("2. **Then the range, not the file.** Every symbol carries `path:line`. Open that range plus "
+             "~10 lines of context. Do not open a 700-line controller to look at one method.")
+    w.append("3. **Reuse before writing.** Search the module for the symbol, route or DTO you need. If it "
+             "exists, extend or call it; a second implementation of the same concern is a defect.")
+    w.append("4. **Read Impact before changing a signature.** Every caller listed must be updated in the "
+             "same change, including callers in other modules (they carry their own `path:line`). Walk one "
+             "level at a time for transitive impact.")
+    w.append("5. **Never copy the inventory or a source file into the conversation as \"context\".** Cite "
+             "`path:line` instead and read what you actually need. The document is a map, quoted into the "
+             "prompt it becomes dead weight that is re-sent on every turn.")
+    w.append("6. **One symbol, one question? Use the CLI, not a document:**")
     w.append("")
     w.append("```bash")
     w.append("python3 <skill>/scripts/ai_inventory.py --root . --context SYMBOL_NAME --budget 8000")
     w.append("```")
+    w.append("")
+    w.append("7. **Absence is not proof.** Dynamic dispatch, reflection, generated code and unsupported "
+             "languages are not indexed. Grep before concluding that something is unused.")
     w.append("")
     w.append("## Modules")
     w.append("")
@@ -866,8 +884,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", default=None, help="markdown path (default <root>/AI_INVENTORY.md)")
     ap.add_argument("--json", default=None, help="json path (default <root>/ai_inventory.json)")
     ap.add_argument("--no-json", action="store_true")
-    ap.add_argument("--max-chars", type=int, default=160_000,
-                    help="warn when the document exceeds this size (default 160000)")
+    ap.add_argument("--max-chars", type=int, default=40_000,
+                    help="size that triggers the module split (default 40000)")
     ap.add_argument("--context", default=None,
                     help="print a minimal context pack for one symbol instead of the whole document")
     ap.add_argument("--budget", type=int, default=8000, help="max chars for --context (default 8000)")

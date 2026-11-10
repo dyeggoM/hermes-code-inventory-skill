@@ -202,15 +202,153 @@ def sync(a):
  else: status="partial" if warnings else "ok"
  c.execute("UPDATE sync_runs SET analyzer_status=? WHERE id=?",(status,rid));c.commit()
  print(json.dumps(dict(root=str(root),git_head=head,working_tree_dirty=dirty,discovered_files=len(allf),changed_files=len(changed),retried_files=len(retried),deleted_files=len(deleted),languages=sorted(groups),analyzer_status=status,warnings=warnings),indent=2))
+def _sym_line(c,sym):
+ r=c.execute("SELECT name,signature,path,line,language FROM functions WHERE symbol_key=?",(sym,)).fetchone()
+ return r
+def _resolve_symbol(c,needle):
+ """Exact key, exact name, then a suffix/LIKE match. Returns (row, candidates)."""
+ for sql,args in (("SELECT symbol_key,name,signature,path,line FROM functions WHERE symbol_key=?",(needle,)),
+                  ("SELECT symbol_key,name,signature,path,line FROM functions WHERE name=?",(needle,)),
+                  ("SELECT symbol_key,name,signature,path,line FROM functions WHERE symbol_key LIKE ? OR name LIKE ? ORDER BY path,line",("%."+needle,"%."+needle))):
+  rows=list(c.execute(sql,args))
+  if len(rows)==1: return rows[0],[]
+  if len(rows)>1: return None,rows
+ rows=list(c.execute("SELECT symbol_key,name,signature,path,line FROM functions WHERE symbol_key LIKE ? OR name LIKE ? ORDER BY path,line",("%"+needle+"%","%"+needle+"%")))
+ if len(rows)==1: return rows[0],[]
+ return None,rows
+def impact(a):
+ """Who breaks if this symbol changes: transitive callers, cheapest useful answer to that question."""
+ root=Path(a.root).resolve();c=db(root)
+ root_sym,cands=_resolve_symbol(c,a.symbol)
+ if root_sym is None:
+  if cands:
+   print(f"`{a.symbol}` is ambiguous, {len(cands)} candidates — pass the full symbol_key:")
+   for r in cands[:20]: print(f"- `{r['symbol_key']}` at {r['path']}:{r['line']}")
+   if len(cands)>20: print(f"- … {len(cands)-20} more; refine the name")
+  else:
+   print(json.dumps({"error":"symbol not indexed","symbol":a.symbol},indent=2))
+  raise SystemExit(2)
+ out=[];budget=a.budget;used=0;edges=0;seen=set();frontier=[(root_sym["symbol_key"],0)]
+ out.append(f"# Impact of `{root_sym['symbol_key']}` — {root_sym['path']}:{root_sym['line']} depth <= {a.depth}")
+ out.append("")
+ while frontier:
+  sym,depth=frontier.pop(0)
+  if depth>=a.depth: continue
+  rows=list(c.execute("SELECT caller_symbol_key,callee_name,path,line FROM calls WHERE callee_symbol_key=? OR callee_name=?",(sym,sym)))
+  for r in rows:
+   key=(r["caller_symbol_key"],sym)
+   if key in seen: continue
+   seen.add(key);edges+=1
+   fn=_sym_line(c,r["caller_symbol_key"]) if r["caller_symbol_key"] else None
+   where=f"{r['path']}:{r['line']}" if r["path"] else (f"{fn['path']}:{fn['line']}" if fn and fn["line"] else "?")
+   label=fn["name"] if fn else (r["callee_name"] or "?")
+   line=f"{'  '*depth}- depth {depth+1}: `{label}` at {where}"
+   if used+len(line)>budget:
+    out.append(f"{'  '*depth}- … truncated at --budget {budget}; raise it or lower --depth")
+    frontier=[];break
+   out.append(line);used+=len(line)+1
+   if r["caller_symbol_key"] and r["caller_symbol_key"]!=root_sym["symbol_key"]:
+    frontier.append((r["caller_symbol_key"],depth+1))
+ out.append("")
+ if edges==0:
+  out.append("no callers in the index: this looks like an entry point (HTTP route, test, CLI or public "
+             "API), so nothing in the codebase depends on its signature. Callers outside the indexed "
+             "languages or reached by dynamic dispatch are invisible here.")
+ else:
+  out.append(f"callers listed: {edges} (unresolved framework/dynamic calls are not edges)")
+ print("\n".join(out))
+def _resolve_ref(root,ref):
+ """Prefer the branch the user named, but use its remote-tracking twin when the local one is behind:
+ a stale local `main` silently turns a delta into the whole merge history."""
+ remote = ref if "/" in ref else "origin/"+ref
+ have_local = bool(git(root,"rev-parse","--verify","--quiet",ref+"^{commit}"))
+ have_remote = bool(git(root,"rev-parse","--verify","--quiet",remote+"^{commit}"))
+ if have_local and have_remote and git(root,"rev-list","--count",ref+".."+remote):
+  return remote
+ if have_local:
+  return ref
+ if have_remote:
+  return remote
+ return ref
+def delta(a):
+ """What this branch or working tree changed, and who outside the change calls it: the review pack."""
+ root=Path(a.root).resolve();c=db(root)
+ base=_resolve_ref(root,a.base)
+ if a.worktree:
+  names=[n for n in git(root,"diff","--name-only",base).splitlines() if n.strip()]
+  untracked=[n for n in git(root,"ls-files","--others","--exclude-standard").splitlines() if n.strip()]
+  # the index lives inside the repository and is not code: it would otherwise show up as a change
+  names+=[n for n in untracked if not any(part in IGNORE for part in Path(n).parts)]
+  label=f"{base} → working tree"
+ else:
+  names=[n for n in git(root,"diff","--name-only",base+"...HEAD").splitlines() if n.strip()]
+  label=f"{base}...HEAD"
+ seen=set();changed=[]
+ for n in names:
+  if n in seen: continue
+  seen.add(n);changed.append(n)
+ indexed={r["path"] for r in c.execute("SELECT path FROM file_state")}
+ out=[f"# Delta {label} — {len(changed)} file(s) changed",""];used=0;budget=a.budget
+ touched=set(changed)
+ for path in sorted(changed):
+  if path not in indexed:
+   continue
+  syms=list(c.execute("SELECT name,path,line,signature FROM functions WHERE path=? ORDER BY line",(path,)))
+  if not syms: continue
+  block=[f"## {path} — {len(syms)} symbol(s)"]
+  for s in syms:
+   outside=list(c.execute(
+    "SELECT DISTINCT f.name,f.path,f.line FROM calls c JOIN functions f ON f.symbol_key=c.caller_symbol_key "
+    "WHERE (c.callee_symbol_key IN (SELECT symbol_key FROM functions WHERE path=? AND name=?) OR c.callee_name=?) "
+    "AND f.path<>? ORDER BY f.path,f.line",(path,s["name"],s["name"],path)))
+   outside=[r for r in outside if r["path"] not in touched]
+   head=f"- L{s['line']} `{s['name']}`"
+   block.append(head+(" — called from outside the change:" if outside else ""))
+   for r in outside[:a.max_callers]:
+    block.append(f"  - {r['path']}:{r['line']} `{r['name']}`")
+   if len(outside)>a.max_callers: block.append(f"  - … {len(outside)-a.max_callers} more caller(s)")
+  text="\n".join(block)
+  if used+len(text)>budget:
+   out.append(f"## … truncated at --budget {budget}");break
+  out.append(text);out.append("");used+=len(text)+1
+ unin=[p for p in sorted(changed) if p not in indexed]
+ if unin:
+  out.append(f"## {len(unin)} changed file(s) not indexed (docs, config, generated)")
+  for p in unin[:a.max_callers]: out.append(f"- {p}")
+  if len(unin)>a.max_callers: out.append(f"- … {len(unin)-a.max_callers} more")
+ print("\n".join(out))
+def check(a):
+ """Is the map current? Exit 1 when the index no longer matches the files on disk."""
+ root=Path(a.root).resolve();c=db(root)
+ disk={p.relative_to(root).as_posix():p for p in files(root)}
+ old={r["path"]:r["sha256"] for r in c.execute("SELECT path,sha256 FROM file_state")}
+ stale=sorted(k for k in old if k in disk and digest(disk[k])!=old[k])
+ missing=sorted(k for k in old if k not in disk)
+ unindexed=sorted(k for k in disk if k not in old)
+ runs=c.execute("SELECT count(*) FROM sync_runs").fetchone()[0]
+ last=dict(c.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 1").fetchone()) if runs else None
+ ok=not stale and not missing and not unindexed
+ print(json.dumps({"ok":ok,"indexed_files":len(old),"on_disk":len(disk),"stale":stale[:a.limit],
+                   "deleted_since_sync":missing[:a.limit],"never_indexed":unindexed[:a.limit],
+                   "counts":{"stale":len(stale),"deleted":len(missing),"never_indexed":len(unindexed)},
+                   "last_sync":last},indent=2))
+ if not ok: raise SystemExit(1)
 def main():
  p=argparse.ArgumentParser();s=p.add_subparsers(dest="cmd",required=True)
- for n in ["init","sync","status","search","callers","callees","verify","export"]:
+ for n in ["init","sync","status","search","callers","callees","verify","export","impact","delta","check"]:
   q=s.add_parser(n);q.add_argument("--root",default=".")
   if n=="sync":
    q.add_argument("--full",action="store_true");q.add_argument("--lang",choices=LANGS)
   if n=="search":
    q.add_argument("--query",required=True);q.add_argument("--lang",choices=LANGS)
   if n in ("callers","callees"):q.add_argument("--symbol",required=True)
+  if n=="impact":
+   q.add_argument("--symbol",required=True);q.add_argument("--depth",type=int,default=2)
+   q.add_argument("--budget",type=int,default=6000)
+  if n=="delta":
+   q.add_argument("--base",default="main");q.add_argument("--worktree",action="store_true")
+   q.add_argument("--budget",type=int,default=8000);q.add_argument("--max-callers",type=int,default=6)
+  if n=="check":q.add_argument("--limit",type=int,default=10)
   if n=="export":q.add_argument("--output")
  a=p.parse_args();root=Path(a.root).resolve();c=db(root)
  if a.cmd=="init":print("Initialized",root/".code-inventory/inventory.sqlite3")
@@ -237,5 +375,8 @@ def main():
   obj={t:[dict(r) for r in c.execute("SELECT * FROM "+t)] for t in ["nodes","functions","calls","file_state"]}
   out=json.dumps(obj,indent=2)
   Path(a.output).write_text(out) if a.output else print(out)
+ elif a.cmd=="impact":impact(a)
+ elif a.cmd=="delta":delta(a)
+ elif a.cmd=="check":check(a)
  c.close()
 if __name__=="__main__":main()

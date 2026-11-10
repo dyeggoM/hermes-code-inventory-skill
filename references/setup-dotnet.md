@@ -28,8 +28,11 @@ export PATH="$DOTNET_ROOT:$PATH"
 export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 ```
 
-`MSBuildLocator.RegisterDefaults()` picks the newest installed SDK, so installing 9.0 next to 8.0
-is enough to analyse net9.0 solutions — the analyzer itself keeps running on the 8.0 runtime.
+`MSBuildLocator.RegisterDefaults()` picks the newest installed SDK, and **the process must run on a
+runtime at least as new as that SDK**: the analyzer targets `net8.0` and its csproj sets
+`<RollForward>LatestMajor</RollForward>` for exactly this reason. With an older runtime selected
+(the 8.0 runtime is installed alongside a 9.x SDK and roll-forward is disabled), Locator refuses the
+newer SDK and 100% of the C# files fail — see *What goes wrong*.
 
 ## Build the analyzer
 
@@ -56,6 +59,15 @@ replacing it, `sync --lang cs --full` once — existing rows were produced by th
 - `zero metadata references` warning → SDK older than the project's target framework. Install the
   matching SDK and `sync --lang cs --full`; do not read the 6 or 7 surviving edges as "this project
   has no calls".
-- MSBuild load failure for a solution → the analyzer only looks for `*.sln` / `*.csproj` at the
-  project root, non-recursively. Point `--root` at the directory holding the solution file.
+- `analyzer exited -6` / exit 134 with `System.InvalidOperationException: No instances of MSBuild
+  could be detected` → the analyzer process is running on a runtime older than the installed SDK
+  (typical: the 8.0 runtime present next to a 9.x SDK), so `MSBuildLocator` cannot load that SDK's
+  MSBuild. Keep `<RollForward>LatestMajor</RollForward>` in
+  `analyzers/csharp/CodeInventory.Analyzer.csproj` (it writes `rollForward` into the built
+  `*.runtimeconfig.json`) or export `DOTNET_ROLL_FORWARD=LatestMajor` for whoever runs `sync`.
+  Verify with `grep rollForward <project>/.code-inventory/analyzer/CodeInventory.Analyzer.runtimeconfig.json`
+  before blaming the project.
+- MSBuild load failure for a solution → the analyzer searches `*.sln` / `*.csproj` **recursively**
+  under `--root` (skipping `bin`, `obj`, `.git`, `node_modules`, `.code-inventory`) and prefers the
+  first `.sln`. When a root holds several solutions, point `--root` at the subtree you mean.
 - Reinstalling is safe: the SDK is a self-contained directory, delete `~/.dotnet` to undo.

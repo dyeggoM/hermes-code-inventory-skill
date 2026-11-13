@@ -1,7 +1,7 @@
 ---
 name: code-inventory
 description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.5.0
+version: 0.5.1
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -70,6 +70,11 @@ from instead of the repository:
 - **framework calls** (unresolved targets) per file — dependency info, never impact
 - **coverage** block: index states, resolved-edge ratio, per-language blind spots, analyzer warnings
 
+One index per root, and roots must not nest: the renderer merges every index under `--root`, so two
+overlapping roots count the same symbol twice and inflate every fan-in number. A committed map that
+reports more callers than the source has is that bug, not a stale grep. Keep one `.code-inventory/`
+per root (`.:js`, `src:cs`, `tests:cs`), never one at the repository root *and* one below it.
+
 `--context SYMBOL` prints a pack instead of the document: the symbol's code block plus its callers
 and callees by `path:line` — that is the unit to hand a model together with the task. `--budget`
 caps it.
@@ -85,10 +90,14 @@ the document in a diff describes the code in that same diff. `templates/pre-comm
 working hook — copy it to `.githooks/pre-commit`, `chmod +x`, and
 `git config core.hooksPath .githooks` once per clone. What it has to get right:
 
-- **Scope the sync to the staged languages** (`*.ts/*.vue/*.js` → the JS root, `*.cs` → each C#
-  root). Syncing everything on every commit pays the Roslyn cost (~5 s per file) for a docs edit.
+- **Scope the sync to the staged languages** (`*.py` → the Python root, `*.cs` → each C# root,
+  `*.ts/*.tsx/*.js/*.vue` → the JS root). Syncing everything on every commit pays the Roslyn cost
+  (~5 s per file) for a docs edit. The shipped template derives the touched set from the extensions
+  in the staged diff, so adding a language to `ROOTS` is enough — there is no second list to keep in
+  sync.
 - **`git add` the rendered file.** A hook that regenerates without staging leaves the refresh out of
-  the commit and the worktree dirty.
+  the commit and the worktree dirty — but tolerate a project that deliberately ignores the map: if
+  `git add AI_INVENTORY.md` refuses, warn and let the commit through instead of aborting it.
 - **Pass `--no-stamp`**, or the header moves on every run and the commit is never clean.
 - **Use `--diff-filter=ACMRD`** so a deleted or renamed file also triggers the sync that drops its
   rows.

@@ -1,7 +1,7 @@
 ---
 name: code-inventory
 description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.5.1
+version: 0.5.2
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -38,7 +38,10 @@ is `references/analyzer-contract.md` — read it before adding a language.
    `git status` fills with database files. Whether `AI_INVENTORY.md` (and `inventory/` in split
    mode) is ignored is a decision: ignore it when the map is a local aid, commit it when reviewers
    and other agents should read it — and then refresh it before every commit (see *Committing the
-   document*).
+   document*). Split mode also writes `ai_inventory.json`, megabytes of every symbol and edge: ignore
+   that one too when the map is local, because anything that walks `git ls-files` — a security
+   scanner, a linter, a packaging step — treats an untracked-but-not-ignored JSON as project source
+   and spends its budget on a machine-written file.
 2. Make each language's analyzer available (only the ones you need):
    - *C#* — build once and copy into the project:
      `dotnet build analyzers/csharp/CodeInventory.Analyzer.csproj -c Release` then

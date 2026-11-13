@@ -173,7 +173,9 @@ python3 scripts/ai_inventory.py --root . --no-stamp
 
 Keeping it current is a pre-commit hook: `templates/pre-commit-hook.sh` syncs only the languages the
 staged files touch, re-renders, and stages the result, so the document in a diff describes the code in
-the same diff. Point `ROOTS` at your project's roots and install it once per clone:
+the same diff. Set `ROOTS` to your layout — one `"<relative root>:<lang>"` line per root, languages
+`cs`, `py`, `js`, and no nesting (the template's comment block shows the usual shapes) — then install
+it once per clone:
 
 ```bash
 mkdir -p .githooks && cp <skill>/templates/pre-commit-hook.sh .githooks/pre-commit

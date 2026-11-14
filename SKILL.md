@@ -1,7 +1,7 @@
 ---
 name: code-inventory
 description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.5.2
+version: 0.5.3
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -277,8 +277,8 @@ After touching an analyzer, the coordinator or the renderer:
    `changed_files: 0` and re-analyses nothing while the old rows keep looking healthy.
 3. For C#, rebuild and re-copy the project-local DLL (workflow step 2) before that `--full sync` —
    a stale copy still reports `analyzer_status: ok` while resolving less.
-4. The published mirror is `github.com/dyeggoM/hermes-code-inventory-skill`; copy the changed files
-   over and push, then run the suite from a **fresh clone**. A green run in the working copy is not
+4. The published mirror is wherever this skill is hosted; copy the changed files over and push, then
+   run the suite from a **fresh clone**. A green run in the working copy is not
    proof that the published tree is complete — fixtures and lockfiles are exactly what goes missing.
 
 ### Updating an installed copy

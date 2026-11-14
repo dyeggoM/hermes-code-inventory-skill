@@ -115,7 +115,7 @@ class SingleDocument(Base):
         self.assertIn("## Impact", doc)
         self.assertIn("handler", doc.split("## Impact")[1], "the caller must appear in impact")
 
-    def test_json_companion_is_written(self):
+    def test_json_sidecar_is_written(self):
         self.render()
         payload = json.loads((self.root / "ai_inventory.json").read_text(encoding="utf-8"))
         self.assertEqual(len(payload["edges"]), 1)

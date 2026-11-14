@@ -4,7 +4,7 @@
 The .sqlite3 index is good for machines; an LLM needs something smaller and opinionated:
 what exists, what it does, who calls whom, and where to look. This script merges every
 `<project>/.code-inventory/inventory.sqlite3` under --root into one Markdown file plus a
-JSON companion, and adds three things the database does not carry:
+JSON sidecar, and adds three things the database does not carry:
 
   * doc-comment purposes (read from source at render time)
   * HTTP route tables (C# attributes, syntactic)

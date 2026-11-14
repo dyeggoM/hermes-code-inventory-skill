@@ -16,6 +16,14 @@ Supported: **C#** (Roslyn + MSBuild), **Python** (stdlib `ast`), **JavaScript/Ty
                ai_inventory.json               # the same, machine-readable
 ```
 
+## Portability
+
+Plain markdown plus stdlib-only Python (the JS/TS analyzer uses `@babel/parser` from the project's own
+`node_modules`; C# uses the project's Roslyn). No service, no vendor call, no Hermes-specific
+dependency: any agent that can read files and run a shell can adopt it — point it at `SKILL.md`, run
+the analyzer against a repository, and read the SQLite index it produces. Hermes loads the skill
+automatically; nothing in the flow assumes it.
+
 ## Why
 
 An LLM asked to change a function usually receives either the whole repo (too much) or one file

@@ -1,7 +1,7 @@
 ---
 name: code-inventory
 description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.5.3
+version: 0.6.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
@@ -117,6 +117,15 @@ Expect the document to move on every code commit — line numbers shift, so a on
 file's entries. That is the cost of committing it; a team that finds the noise loud should refresh on
 release instead and say so.
 
+**A flat callable index.** Split mode also writes `inventory/FUNCTIONS.md`: every function, method and
+constructor on one line — `path:line`, signature, caller count, callee count and an approximate span —
+grouped by module, ending with the 25 longest. It answers "where is the function I half remember" and
+"what is long enough to read before changing it" without opening a document per module. Generated code
+(`/Migrations/`, `*.Designer.cs`, `*.g.cs`, `obj/`, `bin/`, `dist/`) is left out and the document says
+how many callables it skipped; `--no-functions` omits the file. The span is the distance to the next
+declaration — doc comments included — because the index stores where a symbol starts, not where it
+ends, and the document says exactly that instead of presenting an estimate as a measurement.
+
 **Large repos split automatically.** When the single document would exceed `--max-chars`, the same
 path becomes a router index and each module gets `inventory/<module>.md`: over `--depth 2` path
 segments, refined by sub-folder, then per file whenever a group still holds more than ~120 symbols.
@@ -130,6 +139,9 @@ Rules the generator follows, keep them if you change it:
 - **Never fill an edge.** Impact comes from resolved symbol keys only.
 - **Keep the entry point stable.** `AI_INVENTORY.md` is the document for a small repo and the
   index for a large one; `--split never` forces one file, `--max-chars` decides.
+- **Never present an estimate as a measurement.** The span in `FUNCTIONS.md` is a distance between
+  declarations, not a parsed body; say so in the document, and keep the longest-first section honest
+  by excluding generated files rather than by hiding them.
 - Type declarations live in `nodes`, not `functions`: `ai_inventory.py` pulls them from `nodes` and
   resolves their line from source, so do not assume a symbol is missing just because it has no
   `functions` row.

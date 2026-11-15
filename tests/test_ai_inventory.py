@@ -150,6 +150,7 @@ class SplitMode(Base):
         self.assertIn("## Modules", index)
         self.assertIn("inventory/", index)
         parts = sorted((self.root / "inventory").glob("*.md"))
+        parts = [p for p in parts if p.name != "FUNCTIONS.md"]  # the flat index is not a module part
         self.assertEqual(len(parts), summary["parts"])
         self.assertTrue(all(p.stat().st_size > 0 for p in parts))
 
@@ -159,6 +160,86 @@ class SplitMode(Base):
                            for p in (self.root / "inventory").glob("*.md"))
         self.assertIn("app/web/api.py", joined,
                       "the part holding svc.save must still name its caller in app/web")
+
+
+class FunctionInventory(Base):
+    """The flat callable index — "which functions exist, and which are long enough to matter"."""
+
+    def functions_path(self):
+        return self.root / "inventory" / "FUNCTIONS.md"
+
+    def test_it_lists_every_callable_with_its_counts(self):
+        self.render("--max-chars", "10", "--split", "auto", "--no-json")
+        text = self.functions_path().read_text(encoding="utf-8")
+
+        self.assertIn("2 callables across 2 files", text)
+        self.assertIn("`app/services/svc.py:4` · **save** def save(order) · `← 1` · `→ 1`", text,
+                      "the caller and callee counts come from the edges, not from a guess")
+        self.assertIn("`app/web/api.py:4` · **handler** def handler(request) · `← 0` · `→ 1`", text)
+
+    def test_it_says_the_span_is_an_estimate(self):
+        self.render("--max-chars", "10", "--split", "auto", "--no-json")
+        text = self.functions_path().read_text(encoding="utf-8")
+
+        self.assertIn("distance to the next declaration", text)
+        self.assertIn("not as a measurement", text)
+        self.assertIn("≈", text, "the length is never presented as exact")
+
+    def test_generated_files_are_left_out(self):
+        # A migration is the model written out: nobody refactors its 700-line BuildModel, and it would
+        # sit at the top of every "longest" list forever. Driven through the renderer's own entry point
+        # so the filter is what is tested, not the loader's join rules.
+        module = load_module()
+        self.write("Migrations/Snapshot.Designer.cs", "class Snapshot { void BuildModel() { } }\n")
+        data = {
+            "symbols": {
+                "M:Snapshot.BuildModel": {"kind": "method", "name": "BuildModel", "path": "Migrations/Snapshot.Designer.cs",
+                                          "line": 1, "signature": "void BuildModel()"},
+                "py:app.services.svc:save": {"kind": "function", "name": "save", "path": "app/services/svc.py",
+                                             "line": 4, "signature": "def save(order)"},
+            },
+            "edges": [], "files": {}, "containers": {}, "warnings": [],
+        }
+        out = str(self.root / "AI_INVENTORY.md")
+        result = module.write_functions(str(self.root), data, out, 2, stamp=False)
+        text = Path(result["path"]).read_text(encoding="utf-8")
+
+        self.assertNotIn("BuildModel", text)
+        self.assertIn("**save**", text)
+        self.assertIn("left out", text, "the document says what it is not showing")
+        self.assertEqual(result["callables"], 1)
+
+    def test_no_functions_skips_the_document_but_keeps_the_slices(self):
+        self.render("--max-chars", "10", "--split", "auto", "--no-json", "--no-functions")
+
+        self.assertFalse(self.functions_path().exists())
+        self.assertTrue((self.root / "inventory" / "app-services.md").exists())
+
+    def test_the_router_index_points_at_it(self):
+        self.render("--max-chars", "10", "--split", "auto", "--no-json")
+        index = (self.root / "AI_INVENTORY.md").read_text(encoding="utf-8")
+
+        self.assertIn("**Functions**", index)
+        self.assertIn("inventory/FUNCTIONS.md", index)
+
+
+class PurposeClamp(unittest.TestCase):
+    """An index built before an edit can point past the end of the file it describes."""
+
+    def test_a_line_beyond_the_file_does_not_break_the_render(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+            sym = {"key": "py:a:f", "path": "a.py", "line": 999, "db_description": "",
+                   "language": "py", "kind": "function"}
+            self.assertEqual(module.purpose(str(root), sym), "")
+
+    def test_a_file_that_is_not_there_at_all_does_not_break_the_render(self):
+        module = load_module()
+        sym = {"key": "py:gone:f", "path": "gone.py", "line": 5, "db_description": "",
+               "language": "py", "kind": "function"}
+        self.assertEqual(module.purpose("/nonexistent-root", sym), "")
 
 
 class ContextPack(Base):

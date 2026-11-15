@@ -175,7 +175,11 @@ def purpose(root: str, sym: dict) -> str:
     if sym["db_description"]:
         return sym["db_description"]
     lines = source_lines(root, sym["path"])
-    i = sym["line"] - 2
+    if not lines:
+        return ""
+    # An index built before an edit can point past the end of the file (or at a line that moved);
+    # clamping keeps `purpose` from taking the whole render down with an IndexError.
+    i = min(sym["line"] - 2, len(lines) - 1)
     while i >= 0 and re.match(r"^\s*(\[[^\]]*\]|@\w)", lines[i] or ""):
         i -= 1
     if i < 0:
@@ -769,7 +773,116 @@ def build_groups(syms: dict[str, dict], depth: int, max_symbols: int = 120,
     return rec(depth, list(syms))
 
 
-def write_split(root: str, data: dict, out: str, depth: int, stamp: bool = True) -> dict:
+CALLABLE_KINDS = {"function", "method", "constructor", "component"}
+
+# Generated files are not code anyone refactors: EF migrations and snapshots are the model written
+# out, and their 700-line BuildModel would sit at the top of every "longest" list forever.
+GENERATED_MARKERS = ("/Migrations/", ".Designer.cs", ".g.cs", ".generated.", "/obj/", "/bin/", "/dist/")
+
+
+def is_generated(path: str) -> bool:
+    return any(marker in f"/{path}" for marker in GENERATED_MARKERS)
+
+
+def _spans(syms: dict[str, dict], root: str) -> dict[str, int]:
+    """Approximate length of every callable, from the next symbol that starts after it in the file.
+
+    The index stores where a symbol starts, not where it ends, so this is a distance to the next
+    declaration — doc comments and blank lines included. It is a pointer to what is long, not a
+    measurement; the document says so instead of pretending otherwise.
+    """
+    by_file: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    for key, sym in syms.items():
+        by_file[sym["path"]].append((key, sym))
+    lengths = {path: len(source_lines(root, path)) for path in by_file}
+    spans: dict[str, int] = {}
+    for path, group in by_file.items():
+        group.sort(key=lambda pair: pair[1]["line"])
+        for index, (key, sym) in enumerate(group):
+            end = (group[index + 1][1]["line"] if index + 1 < len(group)
+                   else lengths.get(path, sym["line"]) + 1)
+            spans[key] = max(1, end - sym["line"])
+    return spans
+
+
+def write_functions(root: str, data: dict, out: str, depth: int, stamp: bool = True) -> dict:
+    """A flat inventory of every callable: the question "which functions exist, and where".
+
+    The module documents answer "what is in this module"; this one answers "where is the function I
+    half remember" without opening a document per module — and, in one section, "what is long enough
+    to be worth reading before changing it".
+    """
+    syms: dict[str, dict] = data["symbols"]
+    edges = data["edges"]
+    callers: Counter = Counter()
+    callees: Counter = Counter()
+    for edge in edges:
+        callers[edge["callee"]] += 1
+        callees[edge["caller"]] += 1
+
+    spans = _spans(syms, root)
+    all_rows = [(k, s) for k, s in syms.items() if s["kind"] in CALLABLE_KINDS]
+    rows = [(k, s) for k, s in all_rows if not is_generated(s["path"])]
+    skipped = len(all_rows) - len(rows)
+    rows.sort(key=lambda pair: (pair[1]["path"], pair[1]["line"]))
+
+    groups: dict[str, list[tuple[str, dict]]] = defaultdict(list)
+    for key, sym in rows:
+        groups[group_of(sym["path"], depth)].append((key, sym))
+
+    w: list[str] = []
+    w.append(f"# Function inventory — {os.path.basename(os.path.abspath(root))}")
+    w.append("")
+    w.append(("Generated" if not stamp else "Generated " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
+             + " by `code-inventory` / `ai_inventory.py`. Do not hand-edit.")
+    w.append("")
+    w.append(f"{len(rows)} callables across {len({s['path'] for _, s in rows})} files. One line each:")
+    if skipped:
+        w.append("")
+        w.append(f"({skipped} more in generated files — migrations, snapshots, build output — left out: "
+                 f"nobody refactors them.)")
+    w.append("")
+    w.append("`path:line` · **name**(signature) · `← n` callers · `→ n` calls · `≈n lines`")
+    w.append("")
+    w.append("The span is the distance to the next declaration in the same file — doc comments and blank "
+             "lines included — because the index records where a symbol starts, not where it ends. Read "
+             "it as \"long enough to look at before changing\", not as a measurement.")
+    w.append("")
+    w.append("Module documents (what a module is, and its impact lines): `AI_INVENTORY.md` → `inventory/`.")
+    w.append("")
+    for module in sorted(groups):
+        w.append(f"## {module}")
+        w.append("")
+        for key, sym in groups[module]:
+            signature = _clean([sym["signature"] or sym["name"]], limit=150)
+            w.append(f"- `{sym['path']}:{sym['line']}` · **{sym['name']}** {signature} · "
+                     f"`← {callers.get(key, 0)}` · `→ {callees.get(key, 0)}` · `≈{spans.get(key, 0)} lines`")
+        w.append("")
+
+    longest = sorted(rows, key=lambda pair: -spans.get(pair[0], 0))[:25]
+    w.append("## Longest first — read these before changing them")
+    w.append("")
+    for key, sym in longest:
+        w.append(f"- `≈{spans.get(key, 0)} lines` · `{sym['path']}:{sym['line']}` · **{sym['name']}** "
+                 f"· `← {callers.get(key, 0)}` callers")
+    w.append("")
+    w.append("## Regenerate")
+    w.append("")
+    w.append("```bash")
+    w.append("python3 <skill>/scripts/inventory.py sync --root . --lang cs   # or py / js")
+    w.append("python3 <skill>/scripts/ai_inventory.py --root .")
+    w.append("```")
+    w.append("")
+    text = "\n".join(w).rstrip() + "\n"
+    path = os.path.join(os.path.dirname(out), "inventory", "FUNCTIONS.md")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    return {"path": path, "chars": len(text), "callables": len(rows)}
+
+
+def write_split(root: str, data: dict, out: str, depth: int, stamp: bool = True,
+                no_functions: bool = False) -> dict:
     """Large repo: AI_INVENTORY.md becomes a router; one document per module group."""
     syms: dict[str, dict] = data["symbols"]
     edges = data["edges"]
@@ -850,6 +963,7 @@ def write_split(root: str, data: dict, out: str, depth: int, stamp: bool = True)
         w.append(f"- **{g}** — {info['files']} file{'s' if info['files'] != 1 else ''}, "
                  f"{info['symbols']} symbols, {info['chars'] // 1024} KB → [`inventory/{base}`](inventory/{base})"
                  f" · {sample}")
+    modules_end = len(w)
     w.append("")
     if cross:
         w.append("## Cross-module calls (who depends on whom)")
@@ -874,10 +988,18 @@ def write_split(root: str, data: dict, out: str, depth: int, stamp: bool = True)
     w.append("python3 <skill>/scripts/ai_inventory.py --root .")
     w.append("```")
     w.append("")
+    functions: dict = {}
+    if not no_functions:
+        functions = write_functions(root, data, out, depth, stamp=stamp)
+        w.insert(modules_end,
+                 f"- **Functions** — {functions['callables']} callables, one line each, longest first at "
+                 f"the end → [`inventory/FUNCTIONS.md`](inventory/FUNCTIONS.md)")
+
     text = "\n".join(w).rstrip() + "\n"
     with open(out, "w", encoding="utf-8") as fh:
         fh.write(text)
     return {"index": out, "index_chars": len(text), "parts": written,
+            "functions": functions,
             "largest_part": max((v["chars"] for v in written.values()), default=0)}
 
 
@@ -887,6 +1009,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--out", default=None, help="markdown path (default <root>/AI_INVENTORY.md)")
     ap.add_argument("--json", default=None, help="json path (default <root>/ai_inventory.json)")
     ap.add_argument("--no-json", action="store_true")
+    ap.add_argument("--no-functions", action="store_true",
+                    help="do not write the flat callable inventory (inventory/FUNCTIONS.md)")
     ap.add_argument("--max-chars", type=int, default=40_000,
                     help="size that triggers the module split (default 40000)")
     ap.add_argument("--context", default=None,
@@ -917,7 +1041,8 @@ def main(argv: list[str]) -> int:
     out = os.path.abspath(args.out or os.path.join(root, "AI_INVENTORY.md"))
     split = None
     if len(markdown) > args.max_chars and args.split != "never":
-        split = write_split(root, data, out, args.depth, stamp=not args.no_stamp)
+        split = write_split(root, data, out, args.depth, stamp=not args.no_stamp,
+                            no_functions=args.no_functions)
     else:
         with open(out, "w", encoding="utf-8") as fh:
             fh.write(markdown)

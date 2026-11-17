@@ -78,6 +78,23 @@ python3 scripts/ai_inventory.py --root . --context Service.save --budget 8000
 `--context` prints just that symbol's code block plus its callers and callees by `path:line` — the
 smallest unit that still carries impact information.
 
+## Static sites: the page is the unit
+
+When the repository is a static site (HTML + CSS + JS with no build step, or pages produced by a
+generator script), the useful reference is a **page**, not a function: who generates it, which
+sections and ids it has, which CSS/JS it loads and where its data comes from. An agent that has to
+edit one page opens that page's map instead of the whole tree.
+
+```bash
+python3 scripts/page_inventory.py sync --root /path/to/site
+python3 scripts/page_inventory.py show equipos/lp-galaxy-conga.html --root /path/to/site
+```
+
+`sync` writes `.page-inventory/pages.json` and `.page-inventory/PAGES.md` (one line per page; add
+the directory to the project's `.gitignore` — the index is not source). `show` prints title, meta,
+canonical, the template that produced the page, the `h1`–`h3` outline, sections with their ids,
+assets and link counts. Full workflow and pitfalls in `references/pages.md`.
+
 ## What the document contains
 
 - one line per symbol, grouped by file: `Lnn`, kind, qualified name, parameters/return, fields or

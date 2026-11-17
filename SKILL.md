@@ -1,13 +1,13 @@
 ---
 name: code-inventory
-description: "Use when indexing code. C#, Python, JS/TS call graphs."
-version: 0.6.0
+description: "Use when indexing code or static site pages. Call graphs + page maps."
+version: 0.7.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [csharp, python, javascript, typescript, react, vue, angular, roslyn, code-index, sqlite, call-graph]
+    tags: [csharp, python, javascript, typescript, react, vue, angular, roslyn, code-index, sqlite, call-graph, html, static-site, page-index]
     related_skills: [codebase-inspection, systematic-debugging]
 ---
 
@@ -24,12 +24,36 @@ with `scripts/ai_inventory.py` — to give an LLM a map of the code instead of t
 Supported: C# (Roslyn/MSBuild), Python (stdlib `ast`), JavaScript/TypeScript including React, Vue
 SFCs and Angular (`@babel/parser`).
 
+**Si el repositorio es un sitio estático (HTML + CSS + JS sin build, o páginas generadas por un
+script), la referencia es la página, no la función**: usa `scripts/page_inventory.py` (§ *Inventario
+por página*) para cargar y actualizar **una página** en vez de todo el código. El detalle del flujo,
+las salidas y los pitfalls está en `references/pages.md`.
+
 Do not load it for: languages outside that list, a one-off "where is X defined" (use
 `search_files`), or a repo you only need line counts from (use `codebase-inspection`).
 
 One coordinator, one analyzer per language. The coordinator owns storage, hashing, hierarchy and
 incremental policy; each analyzer parses its language and resolves cross-file edges. The boundary
 is `references/analyzer-contract.md` — read it before adding a language.
+
+## Inventario por página (sitios estáticos)
+
+En un sitio servido como archivos la unidad de trabajo es la página: qué la genera, qué secciones
+tiene y qué carga. Un agente que necesita tocar una ficha abre su mapa, no el árbol entero.
+
+```bash
+python3 scripts/page_inventory.py sync  --root /path/to/site      # indexa (idempotente)
+python3 scripts/page_inventory.py stats --root /path/to/site      # totales, sin <title>/h1
+python3 scripts/page_inventory.py list  --root /path/to/site --filtro "equipos/"
+python3 scripts/page_inventory.py show  equipos/lp-galaxy-conga.html --root /path/to/site
+python3 scripts/page_inventory.py search --text "artistas" --root /path/to/site
+```
+
+`show` devuelve título, meta, canonical, **plantilla que genera la página**, esquema `h1`–`h3`,
+secciones con `id` y clase, CSS/JS e imágenes. `sync` escribe `.page-inventory/pages.json` y
+`.page-inventory/PAGES.md` (una línea por página): el índice no es fuente, agrégalo al `.gitignore`.
+Si la página se genera, se edita la plantilla y se re-sincroniza, nunca el HTML. Ver
+`references/pages.md`.
 
 ## Workflow
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse, hashlib, json, os, sqlite3, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -114,7 +115,25 @@ def fail_group(c,rid,rels,warnings,msg,hashes,status):
  warnings.append(msg)
  for rel in rels:
   diag(c,rid,rel,msg);mark(c,rel,status,hashes.get(rel) if status=="unavailable" else None)
+CS_ANALYZER_TIMEOUT_S=int(os.environ.get("CODE_INVENTORY_ANALYZER_TIMEOUT","180"))
+CS_ANALYZER_WORKERS=max(1,int(os.environ.get("CODE_INVENTORY_ANALYZER_WORKERS","4")))
+def cs_analyze_one(dn,analyzer,root,rel):
+ """One analyzer call, bounded. Returns (rel,data,error): a hung analyzer must not hang the sync."""
+ try:
+  p=subprocess.run([dn,str(analyzer),"analyze-file","--root",str(root),"--file",str(root/rel)],
+                   capture_output=True,text=True,timeout=CS_ANALYZER_TIMEOUT_S)
+ except subprocess.TimeoutExpired:
+  return rel,None,"analyzer timed out after "+str(CS_ANALYZER_TIMEOUT_S)+"s (CODE_INVENTORY_ANALYZER_TIMEOUT)"
+ except OSError as e:
+  return rel,None,"analyzer could not start: "+str(e)
+ if p.returncode:
+  return rel,None,"analyzer exited "+str(p.returncode)+": "+((p.stderr or "").strip() or "no stderr")[:300]
+ try:
+  return rel,json.loads(p.stdout),None
+ except Exception as e:
+  return rel,None,"invalid analyzer JSON: "+str(e)
 def run_cs(c,rid,root,rels,hashes,warnings,dn,analyzer):
+ pending=[];total=len(rels)
  for rel in rels:
   fnode=fnode_for(c,rel)
   if fnode is None: warnings.append(rel+": file node missing; skipped");continue
@@ -124,18 +143,27 @@ def run_cs(c,rid,root,rels,hashes,warnings,dn,analyzer):
   if not dn:
    warnings.append("dotnet not found (PATH, DOTNET_ROOT or ~/.dotnet); semantic indexing skipped for "+rel)
    diag(c,rid,rel,warnings[-1]);mark(c,rel,"unavailable",hashes[rel]);continue
-  p=subprocess.run([dn,str(analyzer),"analyze-file","--root",str(root),"--file",str(root/rel)],capture_output=True,text=True)
-  if p.returncode:
-   warnings.append(rel+": analyzer exited "+str(p.returncode)+": "+(p.stderr.strip() or "no stderr")[:300])
-   diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
-  try: data=json.loads(p.stdout)
-  except Exception as e:
-   warnings.append(rel+": invalid analyzer JSON: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel));continue
-  try:
-   with c:
-    apply_file(c,rid,rel,fnode,data);mark(c,rel,SEM_OK,hashes[rel])
-  except Exception as e:
-   warnings.append(rel+": apply failed, previous rows kept: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel))
+  pending.append((rel,fnode))
+ if not pending: return
+ # The analyzer is one .NET process per file, a second or more each: run a few at once and say
+ # where we are, because a silent quarter of an hour reads as a hang and gets killed.
+ done=0;step=max(1,len(pending)//10)
+ print("  cs: analyzing "+str(len(pending))+" file(s) with "+str(CS_ANALYZER_WORKERS)+" worker(s)",file=sys.stderr,flush=True)
+ with ThreadPoolExecutor(max_workers=CS_ANALYZER_WORKERS) as pool:
+  futures=[pool.submit(cs_analyze_one,dn,analyzer,root,rel) for rel,_ in pending]
+  fnodes=dict((rel,fnode) for rel,fnode in pending)
+  for fut in futures:
+   rel,data,error=fut.result();done+=1
+   if error:
+    warnings.append(rel+": "+error);diag(c,rid,rel,warnings[-1])
+    mark(c,rel,"failed" if "timed out" not in error and "could not start" not in error else "unavailable",hashes.get(rel))
+   else:
+    try:
+     with c: apply_file(c,rid,rel,fnodes[rel],data);mark(c,rel,SEM_OK,hashes[rel])
+    except Exception as e:
+     warnings.append(rel+": apply failed, previous rows kept: "+str(e));diag(c,rid,rel,warnings[-1]);mark(c,rel,"failed",hashes.get(rel))
+   if done%step==0 or done==len(pending):
+    print("  cs: "+str(done)+"/"+str(len(pending)),file=sys.stderr,flush=True)
 def run_project(c,rid,root,lang,rels,hashes,warnings):
  argv=analyzer_cmd(lang,root)
  if argv is None:

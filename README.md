@@ -57,6 +57,12 @@ the project's TFM (declarations still index, but every call stays unresolved —
 # 1. index
 python3 scripts/inventory.py init --root /path/to/project
 python3 scripts/inventory.py sync --root /path/to/project          # --lang cs|py|js to limit
+
+The C# analyzer loads the project once per file through Roslyn's build host — roughly ten seconds a
+file — so a full sync of a hundred files takes minutes, not seconds. It reports progress on stderr
+(`cs: 40/105`) and bounds every call, so a stuck analyzer fails that file instead of wedging the sync.
+Two knobs: `CODE_INVENTORY_ANALYZER_WORKERS` (default 4) and `CODE_INVENTORY_ANALYZER_TIMEOUT` (seconds,
+default 180).
 python3 scripts/inventory.py verify --root /path/to/project
 
 # 2. read it
